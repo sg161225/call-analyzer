@@ -21,18 +21,53 @@ with st.expander("How to get a free Groq key (2 minutes, no card)", expanded="GR
         "2. Click **API Keys** → **Create API Key** → give it any name → **Submit**.\n"
         "3. Copy the key (it starts with `gsk_`) and paste it below.")
 
-with st.form("keys"):
+def _mask(v: str) -> str:
+    return f"{v[:4]}…{v[-4:]}" if len(v) > 10 else "saved"
+
+
+def _test_groq() -> tuple[bool, str]:
+    try:
+        import groq
+        groq.Groq().models.list()
+        return True, "Groq key works ✅"
+    except Exception as e:  # show the real reason to the user
+        return False, f"Groq rejected the key or could not be reached: {type(e).__name__}: {str(e)[:200]}"
+
+
+# Message from the previous click survives the page reload.
+if msg := st.session_state.pop("key_msg", None):
+    (st.success if msg[0] else st.error)(msg[1])
+
+with st.form("keys", clear_on_submit=True):
     values = {}
     for name, label in KEY_NAMES.items():
-        have = bool(os.environ.get(name))
-        values[name] = st.text_input(f"{label} {'✅' if have else ''}", type="password", key=name,
-                                     placeholder="saved, leave empty to keep" if have else "paste key here")
-    if st.form_submit_button("Save keys", type="primary"):
-        saved = [n for n, v in values.items() if v.strip()]
-        for n in saved:
-            save_key(n, values[n])
-        st.success(f"Saved {len(saved)} key(s)." if saved else "Nothing to save.")
-        st.rerun()
+        cur = os.environ.get(name, "")
+        status = f" — ✅ saved ({_mask(cur)})" if cur else ""
+        values[name] = st.text_input(f"{label}{status}", type="password",
+                                     placeholder="leave empty to keep the saved key" if cur else "paste key here")
+    submitted = st.form_submit_button("Save keys", type="primary")
+
+if submitted:
+    entered = {n: v.strip().strip('"').strip("'").replace(" ", "") for n, v in values.items() if v.strip()}
+    if not entered:
+        st.session_state["key_msg"] = (False, "Nothing was pasted. Click inside the Groq box, paste (Ctrl+V), then click Save keys.")
+    elif "GROQ_API_KEY" in entered and not entered["GROQ_API_KEY"].startswith("gsk_"):
+        st.session_state["key_msg"] = (False, "That doesn't look like a Groq key: it should start with gsk_. "
+                                              "Copy it again from console.groq.com → API Keys.")
+    else:
+        try:
+            for n, v in entered.items():
+                save_key(n, v)
+            ok, text = _test_groq() if "GROQ_API_KEY" in entered else (True, "")
+            st.session_state["key_msg"] = (ok, f"Saved {len(entered)} key(s). {text}")
+        except OSError as e:
+            st.session_state["key_msg"] = (False, f"Could not write the key file: {e}")
+    st.rerun()
+
+if os.environ.get("GROQ_API_KEY") and st.button("Test Groq key"):
+    ok, text = _test_groq()
+    (st.success if ok else st.error)(text)
+
 st.caption("Keys are saved in a private `.env` file in this app's folder (never uploaded to GitHub). "
            "In Codespaces they stay with your codespace.")
 
