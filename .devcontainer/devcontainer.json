@@ -22,6 +22,12 @@
       "openFiles": [
         "README.md"
       ]
+    },
+    "vscode": {
+      "settings": {
+        "python.createEnvironment.trigger": "off",
+        "python-envs.workspaceSearchPaths": []
+      }
     }
   }
 }
