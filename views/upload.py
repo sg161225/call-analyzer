@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from views.common import load_flat  # noqa: F401  (sets import path)
-from callanalyzer.config import key_status, load_settings
+from callanalyzer.config import load_settings, missing_keys
 from callanalyzer.pipeline import guess_meta, process_call
 from callanalyzer.transcribe import ENGINES
 
@@ -12,7 +12,6 @@ st.title("⬆️ Upload calls")
 st.caption("Recordings are processed and then discarded. Only the review is saved, not the audio or the transcript.")
 
 settings = load_settings()
-keys = key_status()
 
 files = st.file_uploader("Call recordings", accept_multiple_files=True,
                          type=["wav", "mp3", "m4a", "aac", "amr", "ogg", "opus", "flac", "3gp", "mp4", "webm"])
@@ -37,15 +36,12 @@ c1, c2 = st.columns([2, 3])
 default = list(ENGINES).index(settings["transcription"]["engine"])
 engine = c1.selectbox("Speech-to-text engine", list(ENGINES), index=default, format_func=ENGINES.get)
 
-missing = []
-if not keys["Anthropic (analysis)"]:
-    missing.append("ANTHROPIC_API_KEY")
-if engine == "sarvam" and not keys["Sarvam (transcription)"]:
-    missing.append("SARVAM_API_KEY")
-if engine == "openai" and not keys["OpenAI (transcription)"]:
-    missing.append("OPENAI_API_KEY")
+missing = missing_keys(settings, engine)
 if missing:
-    st.error(f"Add {', '.join(missing)} to the `.env` file and restart the app.")
+    st.error(f"Missing key: {', '.join(missing)}. Add it on the **Settings** page (left menu).")
+    st.page_link("views/settings.py", label="Open Settings", icon="⚙️")
+if engine == "local":
+    st.caption("Local Whisper is free but slow: expect a few minutes per call. The model downloads on first use.")
 
 if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(missing)):
     ok = 0

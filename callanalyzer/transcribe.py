@@ -8,7 +8,8 @@ from pathlib import Path
 
 from .audio import split_at_pauses, to_wav16k
 
-ENGINES = {"sarvam": "Sarvam AI (Hindi/Hinglish)", "openai": "OpenAI", "local": "Local Whisper (free, slow)"}
+ENGINES = {"groq": "Groq Whisper (free tier)", "local": "Local Whisper (free, slow)",
+           "sarvam": "Sarvam AI (paid, Hindi/Hinglish)", "openai": "OpenAI (paid)"}
 
 
 def transcribe(audio_path: Path, settings: dict, engine: str | None = None) -> str:
@@ -17,6 +18,8 @@ def transcribe(audio_path: Path, settings: dict, engine: str | None = None) -> s
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         wav = to_wav16k(audio_path, tmp / "call.wav")
+        if engine == "groq":
+            return _groq(wav, tmp, cfg)
         if engine == "sarvam":
             return _sarvam(wav, tmp, cfg)
         if engine == "openai":
@@ -24,6 +27,30 @@ def transcribe(audio_path: Path, settings: dict, engine: str | None = None) -> s
         if engine == "local":
             return _local(wav, cfg)
         raise ValueError(f"Unknown transcription engine: {engine}")
+
+
+def _groq(wav: Path, tmp: Path, cfg: dict) -> str:
+    import groq
+
+    if not os.environ.get("GROQ_API_KEY"):
+        raise RuntimeError("Groq API key is not set. Add it on the Settings page.")
+    client = groq.Groq()
+    translate = cfg.get("groq_task", "translate") == "translate"
+    prompt = "Phone call between a software company executive and a customer. Terms: " + ", ".join(cfg.get("keyterms", []))
+    parts = []
+    # Free tier accepts files up to 25 MB; 10 minutes of 16 kHz mono WAV is about 19 MB.
+    for chunk in split_at_pauses(wav, tmp / "chunks", max_len=600):
+        with open(chunk, "rb") as f:
+            try:
+                if translate:  # translation is only offered on whisper-large-v3
+                    resp = client.audio.translations.create(model="whisper-large-v3", file=f, prompt=prompt)
+                else:
+                    resp = client.audio.transcriptions.create(model=cfg.get("groq_model", "whisper-large-v3"), file=f, prompt=prompt)
+            except groq.RateLimitError as e:
+                raise RuntimeError("Groq free-tier audio limit reached. Wait a while (limits reset hourly/daily) "
+                                   "or switch the engine to 'Local Whisper'.") from e
+        parts.append(resp.text.strip())
+    return "\n".join(p for p in parts if p)
 
 
 def _sarvam(wav: Path, tmp: Path, cfg: dict) -> str:

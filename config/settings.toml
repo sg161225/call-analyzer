@@ -14,8 +14,12 @@ handles objections with empathy, and ends with a dated next step.
 
 [transcription]
 # Engine used to turn audio into text (internal only; transcripts are not stored).
-# One of: "sarvam" (best for Hindi/Hinglish), "openai", "local"
-engine = "sarvam"
+# One of: "groq" (free tier), "local" (free, slow), "sarvam" (paid), "openai" (paid)
+engine = "groq"
+# Groq: "translate" turns Hindi/Hinglish speech straight into English (clearer, uses fewer
+# free-tier tokens); "transcribe" keeps the original language.
+groq_task = "translate"
+groq_model = "whisper-large-v3"
 # Sarvam: model + mode. "codemix" keeps English words (voucher, GST, laptop) in English.
 sarvam_model = "saaras:v3"
 sarvam_mode = "codemix"
@@ -28,6 +32,11 @@ local_model = "large-v3"
 keyterms = ["BUSY", "voucher", "GST", "invoice", "e-way bill", "renewal", "mobile app"]
 
 [analysis]
+# Who writes the call reviews: "groq" (free tier) or "anthropic" (paid, best quality)
+provider = "groq"
+# Groq model. Alternatives: "llama-3.3-70b-versatile", "openai/gpt-oss-20b" (higher free limits)
+groq_model = "openai/gpt-oss-120b"
+# Anthropic model (used only when provider = "anthropic")
 model = "claude-opus-5-5"
-# low | medium | high: higher = more thorough, slower, costlier
+# low | medium | high: higher = more thorough, slower (and costlier on paid providers)
 effort = "medium"

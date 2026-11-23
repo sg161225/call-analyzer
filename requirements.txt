@@ -1,5 +1,6 @@
 anthropic>=2.12
 streamlit>=1.40
+groq>=1.0
 pandas>=2.2
 altair>=5
 openpyxl>=3.1

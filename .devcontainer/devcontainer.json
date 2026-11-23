@@ -13,14 +13,8 @@
     }
   },
   "secrets": {
-    "ANTHROPIC_API_KEY": {
-      "description": "Anthropic API key for call reviews (console.anthropic.com)"
-    },
-    "SARVAM_API_KEY": {
-      "description": "Sarvam AI key for Hindi/Hinglish speech-to-text (dashboard.sarvam.ai)"
-    },
-    "OPENAI_API_KEY": {
-      "description": "Optional: OpenAI key if you use the OpenAI speech engine"
+    "GROQ_API_KEY": {
+      "description": "Optional: free Groq key (console.groq.com). You can also paste it on the app's Settings page."
     }
   },
   "customizations": {

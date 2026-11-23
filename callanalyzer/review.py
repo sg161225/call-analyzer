@@ -83,15 +83,61 @@ def _client() -> anthropic.Anthropic:
     return anthropic.Anthropic()
 
 
+def _provider(settings: dict) -> str:
+    return settings["analysis"].get("provider", "groq")
+
+
+def _groq_chat(system: str, user: str, settings: dict, json_mode: bool) -> str:
+    import groq
+
+    client = groq.Groq()
+    kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
+    model = settings["analysis"].get("groq_model", "openai/gpt-oss-120b")
+    if model.startswith("openai/gpt-oss"):
+        kwargs["reasoning_effort"] = settings["analysis"].get("effort", "medium")
+    try:
+        resp = client.chat.completions.create(
+            model=model, temperature=0.2, max_completion_tokens=8000,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **kwargs)
+    except groq.RateLimitError as e:
+        raise RuntimeError("Groq free-tier limit reached for now. Wait a minute and retry; if it keeps happening, "
+                           "the daily limit is used up (it resets the next day), or set analysis.groq_model to "
+                           "'openai/gpt-oss-20b' in config/settings.toml.") from e
+    except groq.APIStatusError as e:
+        if e.status_code == 413:
+            raise RuntimeError("This call is too long for the Groq free tier in one request. "
+                               "Try a smaller model with a bigger limit (llama-3.3-70b-versatile).") from e
+        raise
+    return resp.choices[0].message.content or ""
+
+
+def _review_groq(system: str, user: str, settings: dict) -> dict:
+    """JSON mode + schema in the prompt, validated with Pydantic; one corrective retry."""
+    schema = json.dumps(CallReview.model_json_schema())
+    system = (system + "\n\nReply with ONE JSON object only, no prose, matching this JSON Schema exactly "
+              "(all fields required; enums must use the exact listed values):\n" + schema)
+    raw = _groq_chat(system, user, settings, json_mode=True)
+    try:
+        return CallReview.model_validate_json(raw).model_dump()
+    except Exception as err:  # pydantic ValidationError or bad JSON
+        fix = (user + "\n\nYour previous reply did not match the schema. Error:\n" + str(err)[:1500]
+               + "\nReturn the corrected JSON object only.")
+        raw = _groq_chat(system, fix, settings, json_mode=True)
+        return CallReview.model_validate_json(raw).model_dump()
+
+
 def review_call(transcript: str, meta: dict, settings: dict) -> dict:
     company = settings["company"]
     context = f"{company['name']}: {company['product']}\n{company['context'].strip()}"
     user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
             f"campaign={meta.get('campaign') or 'unknown'}\n\n<transcript>\n{transcript}\n</transcript>")
+    system = SYSTEM.format(context=context)
+    if _provider(settings) == "groq":
+        return _review_groq(system, user, settings)
     resp = _client().beta.messages.parse(
         model=settings["analysis"]["model"],
         max_tokens=16000,
-        system=SYSTEM.format(context=context),
+        system=system,
         messages=[{"role": "user", "content": user}],
         output_format=CallReview,
         output_config={"effort": settings["analysis"].get("effort", "medium")},
@@ -124,13 +170,38 @@ Markdown with these sections:
 Only use evidence present in the data. Mention sample size, and do not overstate patterns seen in 1-2 calls."""
 
 
+GROQ_MAX_CALLS = 20  # keeps one report inside the free tier's per-request token limit
+
+
+def compact(row: dict) -> dict:
+    """Shorter version of a review for the free tier."""
+    cut = lambda t, n=160: (t or "")[:n]
+    out = {k: row.get(k) for k in ("executive", "date", "campaign", "pitch_version", "call_purpose",
+                                   "outcome", "overall_score", "customer_sentiment_start", "customer_sentiment_end")}
+    for k in ("business_probing", "need_generation", "objection_handling"):
+        a = row.get(k) or {}
+        out[k] = {"rating": a.get("rating"), "observed": cut(a.get("observed"))}
+    p = row.get("pitch") or {}
+    out["pitch"] = {"rating": p.get("rating"), "features": p.get("features_mentioned", [])[:5], "offers": p.get("offers_made", [])}
+    q = row.get("customer_queries") or {}
+    out["queries"] = [cut(x, 90) for x in q.get("queries", [])[:5]]
+    out["unresolved"] = [cut(x, 90) for x in q.get("unresolved", [])[:3]]
+    out["improvements"] = [cut(x, 120) for x in row.get("acpt_improvement", [])[:3]]
+    return out
+
+
 def insights_report(rows: list[dict], settings: dict, focus: str = "") -> str:
     company = settings["company"]
+    groq_mode = _provider(settings) == "groq"
+    if groq_mode:
+        rows = [compact(r) for r in rows[:GROQ_MAX_CALLS]]
     payload = json.dumps(rows, ensure_ascii=False)
     user = f"Company: {company['name']}: {company['product']}\n"
     if focus:
         user += f"Manager's focus for this report: {focus}\n"
     user += f"\n{len(rows)} call reviews:\n<reviews>\n{payload}\n</reviews>"
+    if groq_mode:
+        return _groq_chat(INSIGHTS_SYSTEM, user, settings, json_mode=False)
     with _client().beta.messages.stream(
         model=settings["analysis"]["model"],
         max_tokens=32000,

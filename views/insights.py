@@ -4,8 +4,8 @@ import streamlit as st
 
 from views.common import filters, load_flat
 from callanalyzer import store
-from callanalyzer.config import key_status, load_settings
-from callanalyzer.review import insights_report
+from callanalyzer.config import load_settings, missing_keys
+from callanalyzer.review import GROQ_MAX_CALLS, insights_report
 
 st.title("💡 AI insights")
 st.caption("Claude reads all the call reviews in the selection and writes a report: what's working, what isn't, "
@@ -21,16 +21,21 @@ st.write(f"**{len(view)} call(s)** selected.")
 focus = st.text_input("Anything to focus on? (optional)",
                       placeholder="e.g. why dropped customers are not renewing; compare Sachin's October vs November pitch")
 
-has_key = key_status()["Anthropic (analysis)"]
-if not has_key:
-    st.error("Add ANTHROPIC_API_KEY to the `.env` file and restart the app to generate reports.")
+settings = load_settings()
+need = [k for k in missing_keys(settings, engine="none")]
+has_key = not need
+if need:
+    st.error(f"Missing key: {', '.join(need)}. Add it on the **Settings** page (left menu).")
+if settings["analysis"].get("provider", "groq") == "groq" and len(view) > GROQ_MAX_CALLS:
+    st.warning(f"On the free tier a report covers up to {GROQ_MAX_CALLS} calls; the {GROQ_MAX_CALLS} most recent "
+               "in your selection will be used. Narrow the filters (e.g. one executive or campaign) to focus it.")
 if st.button("Generate report", type="primary", disabled=view.empty or not has_key):
     reviews = raw.set_index("id").loc[view["id"]]
     rows = [{"executive": r["executive"], "date": r["call_date"], "campaign": r["campaign"],
              "pitch_version": r["pitch_version"], **r["review"]} for _, r in reviews.iterrows()]
     with st.spinner(f"Analysing {len(rows)} call reviews… this can take a minute or two."):
         try:
-            md = insights_report(rows, load_settings(), focus)
+            md = insights_report(rows, settings, focus)
         except Exception as e:
             st.error(f"{type(e).__name__}: {e}")
             st.stop()
