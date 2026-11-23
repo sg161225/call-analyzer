@@ -2,14 +2,14 @@
   "name": "Call Analyzer",
   "image": "ghcr.io/sg161225/call-analyzer-devcontainer:latest",
   "postCreateCommand": "bash .devcontainer/ensure-deps.sh",
-  "postAttachCommand": "python -m streamlit run app.py --server.headless true --server.enableCORS false --server.enableXsrfProtection false",
+  "postAttachCommand": "bash .devcontainer/start-app.sh",
   "forwardPorts": [
     8501
   ],
   "portsAttributes": {
     "8501": {
       "label": "Call Analyzer",
-      "onAutoForward": "openPreview"
+      "onAutoForward": "openBrowser"
     }
   },
   "secrets": {

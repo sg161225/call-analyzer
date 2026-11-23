@@ -35,8 +35,11 @@ If the terminal says `streamlit: command not found`, the install didn't finish. 
 ```bash
 sudo apt-get update && sudo apt-get install -y ffmpeg
 python -m pip install --timeout 120 -r requirements.txt
-python -m streamlit run app.py
+bash .devcontainer/start-app.sh
 ```
+
+Open the `https://…app.github.dev` link the script prints (or **Ports** tab → 🌐 on port 8501).
+Do **not** use the `10.0.x.x` "Network URL": it only works inside the codespace.
 
 Codespaces is free for personal GitHub accounts within the monthly allowance. GitHub deletes a codespace after
 30 days without use, so download the Excel sheet regularly as a backup.
