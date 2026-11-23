@@ -81,3 +81,27 @@ with st.expander("All settings"):
 
 st.subheader("Data")
 st.caption(f"Reviews are stored in `{DB_PATH}`. Download the Excel sheet from the Dashboard regularly as a backup.")
+
+from views.common import export_frame, flatten  # noqa: E402
+from callanalyzer import store  # noqa: E402
+
+raw = store.load_calls()
+n_calls, n_reports = len(raw), len(store.load_reports())
+st.write(f"Stored now: **{n_calls} call(s)** and **{n_reports} AI insights report(s)**.")
+
+with st.expander("🗑️ Delete all data", expanded=False):
+    st.warning("This permanently deletes every call review" + (" and AI insights report" if n_reports else "")
+               + ". It can't be undone. Your API keys and settings are kept.")
+    flat = flatten(raw)
+    if not flat.empty:
+        from io import BytesIO  # noqa: E402
+        buf = BytesIO()
+        export_frame(flat).to_excel(buf, index=False, sheet_name="Call reviews")
+        st.download_button("⬇️ Download a backup first (Excel)", buf.getvalue(), "call_reviews_backup.xlsx")
+    also_reports = st.checkbox("Also delete AI insights reports", value=True)
+    sure = st.text_input('Type DELETE to confirm')
+    if st.button("Delete all data", type="primary", disabled=sure.strip().upper() != "DELETE" or n_calls + n_reports == 0):
+        store.delete_all(include_reports=also_reports)
+        st.session_state.clear()
+        st.success("All data deleted.")
+        st.rerun()

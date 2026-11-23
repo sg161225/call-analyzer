@@ -1,23 +1,19 @@
 """Upload -> transcribe (in memory/temp only) -> review -> store."""
 from __future__ import annotations
 
-import re
 import tempfile
 from pathlib import Path
 
 from . import store
+from .filenames import parse_file_name
 from .audio import duration_sec, to_wav16k
 from .review import review_call
 from .transcribe import transcribe
 
 
 def guess_meta(file_name: str) -> dict:
-    """Best-effort pre-fill from names like 'Sachin9873747581DroppedOct.wav'."""
-    stem = Path(file_name).stem
-    m = re.match(r"^([A-Za-z ._-]*?)[\s_-]*(\d{6,})[\s_-]*(.*)$", stem)
-    if m:
-        return {"executive": m.group(1).strip(" ._-").title(), "campaign": m.group(3).strip(" ._-")}
-    return {"executive": "", "campaign": ""}
+    """Pre-fill executive, customer mobile and campaign from the file name."""
+    return parse_file_name(file_name)
 
 
 def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = None) -> int:

@@ -37,16 +37,33 @@ def connect() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    _migrate(con)
     return con
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    """Upgrade databases created by older versions of the app."""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(calls)")}
+    if "mobile" not in cols:
+        con.execute("ALTER TABLE calls ADD COLUMN mobile TEXT")
+        # Fill in executive / mobile / campaign from file names for calls saved before.
+        from .filenames import parse_file_name
+        for cid, fname, ex, camp in con.execute(
+                "SELECT id, file_name, executive, campaign FROM calls").fetchall():
+            g = parse_file_name(fname or "")
+            con.execute("UPDATE calls SET mobile=?, executive=?, campaign=? WHERE id=?",
+                        (g["mobile"] or None, (ex or "").strip() or g["executive"] or None,
+                         (camp or "").strip() or g["campaign"] or None, cid))
+        con.commit()
 
 
 def add_call(meta: dict) -> int:
     with connect() as con:
         cur = con.execute(
-            "INSERT INTO calls (uploaded_at, file_name, executive, call_date, campaign, pitch_version, status)"
-            " VALUES (?,?,?,?,?,?, 'processing')",
+            "INSERT INTO calls (uploaded_at, file_name, executive, mobile, call_date, campaign, pitch_version, status)"
+            " VALUES (?,?,?,?,?,?,?, 'processing')",
             (datetime.now().isoformat(timespec="seconds"), meta["file_name"], meta.get("executive"),
-             meta.get("call_date"), meta.get("campaign"), meta.get("pitch_version")))
+             meta.get("mobile"), meta.get("call_date"), meta.get("campaign"), meta.get("pitch_version")))
         return cur.lastrowid
 
 
@@ -62,7 +79,7 @@ def save_error(call_id: int, error: str) -> None:
 
 
 def update_meta(call_id: int, **fields) -> None:
-    allowed = {"executive", "call_date", "campaign", "pitch_version"}
+    allowed = {"executive", "mobile", "call_date", "campaign", "pitch_version"}
     sets = {k: v for k, v in fields.items() if k in allowed}
     if not sets:
         return
@@ -71,8 +88,26 @@ def update_meta(call_id: int, **fields) -> None:
 
 
 def delete_call(call_id: int) -> None:
+    delete_calls([call_id])
+
+
+def delete_calls(call_ids: list[int]) -> int:
+    if not call_ids:
+        return 0
     with connect() as con:
-        con.execute("DELETE FROM calls WHERE id=?", (call_id,))
+        cur = con.execute(f"DELETE FROM calls WHERE id IN ({','.join('?' * len(call_ids))})",
+                          [int(i) for i in call_ids])
+        return cur.rowcount
+
+
+def delete_all(include_reports: bool = True) -> None:
+    """Remove every stored review (and optionally every AI insights report)."""
+    with connect() as con:
+        con.execute("DELETE FROM calls")
+        if include_reports:
+            con.execute("DELETE FROM reports")
+    with connect() as con:
+        con.execute("VACUUM")
 
 
 def load_calls() -> pd.DataFrame:

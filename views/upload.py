@@ -24,26 +24,30 @@ st.markdown("**Call details**: check and correct these before processing. "
 seed = []
 for f in files:
     g = guess_meta(f.name)
-    seed.append({"File": f.name, "Executive": g["executive"], "Call date": date.today(),
+    seed.append({"File": f.name, "Executive": g["executive"], "Mobile": g["mobile"], "Call date": date.today(),
                  "Campaign": g["campaign"], "Pitch version": ""})
 meta = st.data_editor(
     pd.DataFrame(seed), hide_index=True, width="stretch", num_rows="fixed", key=f"meta_{len(files)}",
     column_config={"File": st.column_config.TextColumn(disabled=True),
                    "Call date": st.column_config.DateColumn(format="DD MMM YYYY", required=True),
-                   "Executive": st.column_config.TextColumn(required=True)})
+                   "Executive": st.column_config.TextColumn(required=True),
+                   "Mobile": st.column_config.TextColumn(help="Customer's mobile number, read from the file name")})
 
 c1, c2 = st.columns([2, 3])
 default = list(ENGINES).index(settings["transcription"]["engine"])
 engine = c1.selectbox("Speech-to-text engine", list(ENGINES), index=default, format_func=ENGINES.get)
 
 missing = missing_keys(settings, engine)
+blank = [r["File"] for r in meta.to_dict("records") if not str(r.get("Executive") or "").strip()]
+if blank:
+    st.warning(f"Fill in the **Executive** for: {', '.join(blank)}. (Double-click the cell to type.)")
 if missing:
     st.error(f"Missing key: {', '.join(missing)}. Add it on the **Settings** page (left menu).")
     st.page_link("views/settings.py", label="Open Settings", icon="⚙️")
 if engine == "local":
     st.caption("Local Whisper is free but slow: expect a few minutes per call. The model downloads on first use.")
 
-if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(missing)):
+if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(missing) or bool(blank)):
     ok = 0
     progress = st.progress(0.0)
     for i, (f, m) in enumerate(zip(files, meta.to_dict("records"))):
@@ -52,6 +56,7 @@ if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(miss
                 d = m["Call date"]
                 process_call(f.getvalue(), {
                     "file_name": f.name, "executive": (m["Executive"] or "").strip(),
+                    "mobile": "".join(ch for ch in str(m.get("Mobile") or "") if ch.isdigit())[-10:],
                     "call_date": d.isoformat() if hasattr(d, "isoformat") else str(d),
                     "campaign": (m["Campaign"] or "").strip(), "pitch_version": (m["Pitch version"] or "").strip(),
                 }, settings, engine)

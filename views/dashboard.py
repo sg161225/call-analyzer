@@ -13,6 +13,19 @@ STATUS_RANGE = ["#0ca30c", "#fab219", "#d03b3b"]
 SEQ_RANGE = ["#cde2fb", "#1c5cab"]  # single-hue blue ramp for magnitude
 POSITIVE = {"Converted / Retained", "Issue resolved", "Follow-up scheduled"}
 
+@st.dialog("Delete calls?")
+def confirm_delete(ids: list[int]) -> None:
+    st.write(f"This permanently deletes **{len(ids)} call review(s)**. It can't be undone.")
+    st.caption("Tip: download the Excel sheet first if you may need these reviews later.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, delete", type="primary", width="stretch"):
+        store.delete_calls(ids)
+        st.session_state.pop("calls_table", None)
+        st.rerun()
+    if c2.button("Cancel", width="stretch"):
+        st.rerun()
+
+
 st.title("📊 Call review dashboard")
 raw, flat = load_flat()
 
@@ -51,10 +64,10 @@ tab_calls, tab_agents, tab_time = st.tabs(["📋 Calls", "👥 Compare executive
 # ---- calls table ----------------------------------------------------------------
 with tab_calls:
     show_notes = st.toggle("Show notes in table", value=False,
-                           help="Off: ratings only. Select a row to see the full notes below.")
+                           help="Off: ratings only. Tick a row to see its full review below.")
     table = pd.DataFrame({
         "Date": view["Date"].dt.strftime("%d %b %Y"), "Executive": view["Executive"],
-        "Customer": view["Customer"], "Outcome": view["Outcome"], "Score": view["Score"],
+        "Mobile": view["Mobile"], "Customer": view["Customer"], "Outcome": view["Outcome"], "Score": view["Score"],
     })
     for key, label in PARAMETERS.items():
         if key in RATED:
@@ -63,9 +76,10 @@ with tab_calls:
                 table[label] = table[label] + " · " + view[f"{key}__text"]
         else:
             table[label] = view[f"{key}__text"]
-    cfg = {"Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%d")}
+    cfg = {"Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%d"),
+           "Mobile": st.column_config.TextColumn("Mobile", width="medium")}
     sel = st.dataframe(table, hide_index=True, width="stretch", column_config=cfg,
-                       on_select="rerun", selection_mode="single-row", key="calls_table")
+                       on_select="rerun", selection_mode="multi-row", key="calls_table")
 
     exp = export_frame(view)
     c1, c2, _ = st.columns([1, 1, 4])
@@ -76,14 +90,39 @@ with tab_calls:
                        width="stretch")
 
     rows = sel.selection.rows if sel and sel.selection else []
-    if rows:
+    ids = [int(view.iloc[i]["id"]) for i in rows]
+    if ids:
+        st.divider()
+        st.markdown(f"**{len(ids)} call(s) ticked**")
+        with st.form("bulk_edit", border=True):
+            st.caption("Fix call details for the ticked calls. Leave a box empty to keep what's there.")
+            one = len(ids) == 1
+            cols = st.columns(5 if one else 4)
+            c1, c2, c3, c4 = cols[:4]
+            mob = cols[4].text_input("Mobile") if one else ""
+            ex = c1.text_input("Executive")
+            dt = c2.date_input("Call date", value=None, format="DD/MM/YYYY")
+            cp = c3.text_input("Campaign")
+            pv = c4.text_input("Pitch version")
+            if st.form_submit_button(f"✏️ Apply to {len(ids)} call(s)"):
+                fields = {k: v for k, v in {"executive": ex.strip(), "campaign": cp.strip(), "mobile": mob.strip(),
+                                            "pitch_version": pv.strip(),
+                                            "call_date": dt.isoformat() if dt else ""}.items() if v}
+                for i in ids:
+                    store.update_meta(i, **fields)
+                st.session_state.pop("calls_table", None)
+                st.rerun()
+        if st.button(f"🗑️ Delete {len(ids)} ticked call(s)", type="secondary"):
+            confirm_delete(ids)
+    if len(rows) == 1:
         r = view.iloc[rows[0]]
         rv = raw.loc[raw["id"] == r["id"], "review"].iloc[0]
         st.divider()
         st.subheader(f"{r['Executive']} · {r['Customer'] or r['File']} · {r['Date']:%d %b %Y}" if pd.notna(r["Date"]) else r["File"])
         st.caption(f"{rv['call_purpose']} · Outcome: **{rv['outcome']}** ({rv['outcome_note']}) · "
                    f"Sentiment {rv['customer_sentiment_start']} → {rv['customer_sentiment_end']} · "
-                   f"{r['Minutes']} min · Score {rv['overall_score']}/10")
+                   f"{r['Minutes']} min · Score {rv['overall_score']}/10"
+                   + (f" · 📱 **{r['Mobile']}**" if r["Mobile"] else "") + f" · File: `{r['File']}`")
         st.write(rv["one_line_summary"])
         for key, label in PARAMETERS.items():
             with st.container(border=True):
@@ -105,22 +144,8 @@ with tab_calls:
                         st.markdown(f"*Features:* {', '.join(a['features_mentioned']) or 'none'}  \n"
                                     f"*Offers:* {', '.join(a['offers_made']) or '**none**'}")
                     st.markdown(f"*Observed:* {a['observed']}  \n*Improve:* {a['improvement']}")
-        with st.expander("Edit call details / delete"):
-            with st.form(f"edit_{r['id']}"):
-                c1, c2, c3, c4 = st.columns(4)
-                ex = c1.text_input("Executive", r["Executive"])
-                dt = c2.date_input("Call date", r["Date"].date() if pd.notna(r["Date"]) else None)
-                cp = c3.text_input("Campaign", r["Campaign"])
-                pv = c4.text_input("Pitch version", r["Pitch version"])
-                if st.form_submit_button("Save"):
-                    store.update_meta(int(r["id"]), executive=ex, call_date=dt.isoformat() if dt else None,
-                                      campaign=cp, pitch_version=pv)
-                    st.rerun()
-            if st.button("🗑️ Delete this call", key=f"del_{r['id']}"):
-                store.delete_call(int(r["id"]))
-                st.rerun()
-    else:
-        st.caption("Select a row to see the full review.")
+    elif not rows:
+        st.caption("Tick a row to see its full review. Tick several to fix their details or delete them together.")
 
 # ---- executive comparison --------------------------------------------------------
 with tab_agents:
