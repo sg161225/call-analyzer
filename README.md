@@ -24,7 +24,20 @@ local SQLite file (`data/calls.db`), which is never committed to git.
 
 ---
 
-## Setup (once per computer)
+## Option A: run in the browser with GitHub Codespaces (no installation)
+
+1. **Add your keys once:** GitHub → your profile → **Settings → Codespaces → Secrets → New secret**.
+   Add `ANTHROPIC_API_KEY` and `SARVAM_API_KEY`, and give each access to this repository.
+2. Open this repository on GitHub → green **Code** button → **Codespaces** tab → **Create codespace on main**.
+3. Wait 2–3 minutes the first time. The app starts automatically. Open the **Ports** tab and
+   click the globe icon next to **Call Analyzer (8501)** if it doesn't open by itself.
+4. Next time, use **Code → Codespaces** and pick your existing codespace. Your reviews are still there.
+
+Notes: each person gets their own codespace and their own reviews. GitHub deletes a codespace after
+30 days of no use, so download the Excel sheet regularly as a backup. Codespaces is free for
+personal accounts up to a monthly limit (about 60 hours); organisations are billed.
+
+## Option B: setup on your own computer (once per computer)
 
 Needs **Python 3.11+** and **ffmpeg**.
 
