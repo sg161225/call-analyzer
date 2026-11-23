@@ -34,7 +34,7 @@ If the terminal says `streamlit: command not found`, the install didn't finish. 
 
 ```bash
 sudo apt-get update && sudo apt-get install -y ffmpeg
-python -m pip install -r requirements.txt
+python -m pip install --timeout 120 -r requirements.txt
 python -m streamlit run app.py
 ```
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from typing import List, Literal
 
-import anthropic
 from pydantic import BaseModel, Field
 
 Rating = Literal["Good", "Partial", "Weak", "Not applicable"]
@@ -79,7 +78,11 @@ comparable across executives and dates. Base every judgement on evidence in the 
 do not invent facts. Keep 'observed' and 'improvement' short and specific."""
 
 
-def _client() -> anthropic.Anthropic:
+def _client():
+    try:
+        import anthropic
+    except ImportError as e:
+        raise RuntimeError("The paid Anthropic option needs: pip install -r requirements-paid.txt") from e
     return anthropic.Anthropic()
 
 

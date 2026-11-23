@@ -1,0 +1,6 @@
+# Optional paid providers
+anthropic>=2.12
+sarvamai>=0.1.48
+openai>=1.50
+# Optional free local speech-to-text (slow on CPU):
+# faster-whisper>=1.1
