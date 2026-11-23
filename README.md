@@ -21,49 +21,44 @@ Each parameter is rated **✅ Good / 🟡 Partial / ❌ Weak**, with what the ex
 
 ---
 
-## Start the app
+## Start the app on Windows (recommended)
 
-### Option A: in the browser with GitHub Codespaces (nothing to install)
+**One-time download**
+1. On this page, click the green **`<> Code`** button → **Download ZIP**.
+2. Open your **Downloads** folder, right-click **call-analyzer-main.zip** → **Extract All…** → **Extract**.
+   Move the extracted folder somewhere easy, e.g. **Documents**.
 
-1. On this repository's page, click the green **Code** button → **Codespaces** tab → **Create codespace on main**.
-2. Wait 2–3 minutes the first time while it installs. The app then opens in a new browser tab.
-   If it doesn't, open the **Ports** tab at the bottom and click the 🌐 globe icon next to port **8501**.
-3. Next time, use **Code → Codespaces** and click your existing codespace; your reviews will still be there.
+**Every time you want to use it**
+1. Open the **call-analyzer-main** folder and double-click **`Start Call Analyzer`** (or `Start Call Analyzer.bat`).
+   - If Windows shows *"Windows protected your PC"*, click **More info** → **Run anyway**.
+   - **First time only:** it installs everything it needs (Python if missing, and the app's packages).
+     This takes 5–10 minutes. If it says *"Python is installed, close this window and run again"*, do that.
+2. Your browser opens the app at **http://localhost:8501**.
+   If it doesn't, open that address yourself.
+3. Keep the black window open while you use the app. Close it to stop the app.
 
-If the terminal says `streamlit: command not found`, the install didn't finish. Run these in the **Terminal** tab:
+Your reviews are saved in the `data` folder inside the app folder. Keep that folder when you update the app.
 
-```bash
-sudo apt-get update && sudo apt-get install -y ffmpeg
-python -m pip install --timeout 120 -r requirements.txt
-bash .devcontainer/start-app.sh
-```
+**Updating to a newer version:** download the ZIP again, extract it, and copy your old `data` folder and
+`.env` file (your saved key) into the new folder.
 
-Open the `https://…app.github.dev` link the script prints (or **Ports** tab → 🌐 on port 8501).
-Do **not** use the `10.0.x.x` "Network URL": it only works inside the codespace.
+### Mac / Linux
 
-Codespaces is free for personal GitHub accounts within the monthly allowance. GitHub deletes a codespace after
-30 days without use, so download the Excel sheet regularly as a backup.
+Download and extract the ZIP as above, open Terminal in the folder, and run `bash start-mac-linux.sh`.
 
-### Option B: on your own computer
+### GitHub Codespaces (alternative, runs in the browser)
 
-Needs **Python 3.11+** and **ffmpeg** (Windows: `winget install ffmpeg`, Mac: `brew install ffmpeg`).
-
-```bash
-git clone https://github.com/sg161225/call-analyzer
-cd call-analyzer
-python -m venv .venv
-.venv\Scripts\activate          # Mac/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-The app opens at http://localhost:8501.
+**Code** → **Codespaces** → **Create codespace on main**, then open the `https://…app.github.dev` link the
+terminal prints. This needs a network that allows `*.app.github.dev`; many office networks block it.
+If you see `streamlit: command not found`, run `bash .devcontainer/ensure-deps.sh` and then
+`bash .devcontainer/start-app.sh` in the Terminal.
 
 ## First-time setup inside the app (2 minutes)
 
-1. Go to **https://console.groq.com** and sign in (Google or email). It's free.
+1. Go to **https://console.groq.com** and sign in (Google or email). It's free and needs no card.
 2. Click **API Keys** → **Create API Key** → any name → **Submit**, then copy the key (starts with `gsk_`).
-3. In the app, open **Settings** (left menu), paste the key into the **Groq** box, and click **Save keys**.
+3. In the app, click **⚙️ Settings** in the left menu, paste the key into the **Groq** box, and click
+   **Save keys**. A green message confirms it was saved and that Groq accepted it.
 
 ## Using it
 
@@ -106,11 +101,13 @@ The scorecard parameters and their definitions are in `callanalyzer/review.py` (
 app.py                  Streamlit entry point
 views/                  Pages: dashboard, upload, insights, settings
 callanalyzer/
-  audio.py              ffmpeg conversion + splitting at pauses
+  audio.py              audio conversion + splitting at pauses (bundled ffmpeg)
   transcribe.py         Groq / local Whisper / Sarvam / OpenAI engines
   review.py             Scorecard schema + AI prompts (Groq or Claude)
   pipeline.py           upload → transcribe → review → store
   store.py              SQLite storage
 config/settings.toml    Editable settings
+Start Call Analyzer.bat Windows launcher (installs on first run)
+start-mac-linux.sh      Mac/Linux launcher
 .devcontainer/          GitHub Codespaces setup
 ```

@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from . import store
-from .audio import duration_sec
+from .audio import duration_sec, to_wav16k
 from .review import review_call
 from .transcribe import transcribe
 
@@ -27,8 +27,9 @@ def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = N
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / f"upload{suffix}"
             path.write_bytes(data)
-            dur = duration_sec(path)
-            text = transcribe(path, settings, engine)
+            wav = to_wav16k(path, Path(tmp) / "call16k.wav")
+            dur = duration_sec(wav)
+            text = transcribe(wav, settings, engine)
         # The audio and transcript are discarded here; only the review is stored.
         if len(text.strip()) < 20:
             raise RuntimeError("Almost no speech was recognised in this recording.")

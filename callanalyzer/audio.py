@@ -2,12 +2,31 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import wave
+from functools import lru_cache
 from pathlib import Path
 
 
+@lru_cache(maxsize=1)
+def ffmpeg_exe() -> str:
+    """System ffmpeg if installed, otherwise the copy bundled with the imageio-ffmpeg package."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError("ffmpeg not found. Run: pip install imageio-ffmpeg") from e
+
+
 def _run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, check=False)
+    if args and args[0] == "ffmpeg":
+        args = [ffmpeg_exe(), *args[1:]]
+    return subprocess.run(args, capture_output=True, text=True, check=False,
+                          encoding="utf-8", errors="replace")
 
 
 def to_wav16k(src: Path, dst: Path) -> Path:
@@ -19,13 +38,13 @@ def to_wav16k(src: Path, dst: Path) -> Path:
     return dst
 
 
-def duration_sec(path: Path) -> float:
-    """Real duration, decoded (headers on call-recorder WAVs are often wrong)."""
-    r = _run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-              "-of", "default=nw=1:nk=1", str(path)])
+def duration_sec(wav16k: Path) -> float:
+    """Real duration of a WAV made by to_wav16k (counted from the samples, because
+    the headers written by call recorders are often wrong)."""
     try:
-        return float(r.stdout.strip())
-    except ValueError:
+        with wave.open(str(wav16k), "rb") as w:
+            return w.getnframes() / float(w.getframerate())
+    except (wave.Error, OSError, ZeroDivisionError):
         return 0.0
 
 
