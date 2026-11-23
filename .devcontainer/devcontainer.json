@@ -1,7 +1,7 @@
 {
   "name": "Call Analyzer",
-  "image": "mcr.microsoft.com/devcontainers/python:3.12",
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y ffmpeg && python -m pip install --timeout 120 -r requirements.txt",
+  "image": "ghcr.io/sg161225/call-analyzer-devcontainer:latest",
+  "postCreateCommand": "bash .devcontainer/ensure-deps.sh",
   "postAttachCommand": "python -m streamlit run app.py --server.headless true --server.enableCORS false --server.enableXsrfProtection false",
   "forwardPorts": [
     8501
