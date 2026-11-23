@@ -30,6 +30,14 @@ Each parameter is rated **✅ Good / 🟡 Partial / ❌ Weak**, with what the ex
    If it doesn't, open the **Ports** tab at the bottom and click the 🌐 globe icon next to port **8501**.
 3. Next time, use **Code → Codespaces** and click your existing codespace; your reviews will still be there.
 
+If the terminal says `streamlit: command not found`, the install didn't finish. Run these in the **Terminal** tab:
+
+```bash
+sudo apt-get update && sudo apt-get install -y ffmpeg
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
+```
+
 Codespaces is free for personal GitHub accounts within the monthly allowance. GitHub deletes a codespace after
 30 days without use, so download the Excel sheet regularly as a backup.
 
