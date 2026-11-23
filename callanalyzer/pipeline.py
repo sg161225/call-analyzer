@@ -1,0 +1,40 @@
+"""Upload -> transcribe (in memory/temp only) -> review -> store."""
+from __future__ import annotations
+
+import re
+import tempfile
+from pathlib import Path
+
+from . import store
+from .audio import duration_sec
+from .review import review_call
+from .transcribe import transcribe
+
+
+def guess_meta(file_name: str) -> dict:
+    """Best-effort pre-fill from names like 'Sachin9873747581DroppedOct.wav'."""
+    stem = Path(file_name).stem
+    m = re.match(r"^([A-Za-z ._-]*?)[\s_-]*(\d{6,})[\s_-]*(.*)$", stem)
+    if m:
+        return {"executive": m.group(1).strip(" ._-").title(), "campaign": m.group(3).strip(" ._-")}
+    return {"executive": "", "campaign": ""}
+
+
+def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = None) -> int:
+    call_id = store.add_call(meta)
+    try:
+        suffix = Path(meta["file_name"]).suffix or ".wav"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"upload{suffix}"
+            path.write_bytes(data)
+            dur = duration_sec(path)
+            text = transcribe(path, settings, engine)
+        # The audio and transcript are discarded here; only the review is stored.
+        if len(text.strip()) < 20:
+            raise RuntimeError("Almost no speech was recognised in this recording.")
+        review = review_call(text, meta, settings)
+        store.save_review(call_id, review, dur)
+    except Exception as e:  # stored so the dashboard can show what failed
+        store.save_error(call_id, f"{type(e).__name__}: {e}")
+        raise
+    return call_id

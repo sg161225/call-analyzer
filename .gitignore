@@ -1,0 +1,11 @@
+.env
+data/
+*.wav
+*.mp3
+*.m4a
+*.amr
+__pycache__/
+.venv/
+venv/
+.streamlit/secrets.toml
+private/

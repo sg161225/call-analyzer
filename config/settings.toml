@@ -1,0 +1,33 @@
+# Call Analyzer settings. Edit freely; the app reloads them on every run.
+# API keys do NOT go here: put them in the .env file (see .env.example).
+
+[company]
+# Tells the AI what your business and product are, so it can judge the pitch.
+name = "BUSY"
+product = "BUSY accounting & billing software (desktop + mobile app)"
+context = """
+Our executives call existing and dropped customers to retain them, renew licences,
+upsell the mobile app and resolve complaints. A good call: probes the business first,
+builds a need, pitches relevant features with a concrete offer, answers every query,
+handles objections with empathy, and ends with a dated next step.
+"""
+
+[transcription]
+# Engine used to turn audio into text (internal only; transcripts are not stored).
+# One of: "sarvam" (best for Hindi/Hinglish), "openai", "local"
+engine = "sarvam"
+# Sarvam: model + mode. "codemix" keeps English words (voucher, GST, laptop) in English.
+sarvam_model = "saaras:v3"
+sarvam_mode = "codemix"
+sarvam_language = "unknown"     # or "hi-IN", "en-IN", ...
+# OpenAI: "gpt-4o-transcribe" or "whisper-1"
+openai_model = "gpt-4o-transcribe"
+# Local faster-whisper: model name ("large-v3", "medium", "small") or a folder path
+local_model = "large-v3"
+# Product / domain words to help recognition (Sarvam saaras:v4 and OpenAI prompt)
+keyterms = ["BUSY", "voucher", "GST", "invoice", "e-way bill", "renewal", "mobile app"]
+
+[analysis]
+model = "claude-opus-5-5"
+# low | medium | high: higher = more thorough, slower, costlier
+effort = "medium"
