@@ -48,7 +48,7 @@ if not exist ".venv\Scripts\python.exe" (
 set "VPY=.venv\Scripts\python.exe"
 
 REM ---- 3. Install / update packages (quick when already installed) ---
-"%VPY%" -c "import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg" >nul 2>&1
+"%VPY%" -c "import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg, sqlalchemy, psycopg2" >nul 2>&1
 if errorlevel 1 (
     echo.
     echo Installing the app's packages. This takes a few minutes the first time...
@@ -59,7 +59,7 @@ if errorlevel 1 (
             "%VPY%" -m pip install --retries 10 --timeout 120 --disable-pip-version-check -r requirements.txt && set "OK=1"
         )
     )
-    "%VPY%" -c "import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg" >nul 2>&1
+    "%VPY%" -c "import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg, sqlalchemy, psycopg2" >nul 2>&1
     if errorlevel 1 (
         echo.
         echo Package installation did not finish. Check your internet connection

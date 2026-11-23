@@ -3,7 +3,8 @@ import os
 import streamlit as st
 
 from views.common import load_flat  # noqa: F401  (sets import path)
-from callanalyzer.config import DB_PATH, KEY_NAMES, SETTINGS_PATH, load_settings, missing_keys, save_key
+from callanalyzer import store
+from callanalyzer.config import KEY_NAMES, SETTINGS_PATH, load_settings, missing_keys, save_key
 
 st.title("⚙️ Settings")
 settings = load_settings()
@@ -38,49 +39,56 @@ def _test_groq() -> tuple[bool, str]:
 if msg := st.session_state.pop("key_msg", None):
     (st.success if msg[0] else st.error)(msg[1])
 
-with st.form("keys", clear_on_submit=True):
-    values = {}
-    for name, label in KEY_NAMES.items():
-        cur = os.environ.get(name, "")
-        status = f" — ✅ saved ({_mask(cur)})" if cur else ""
-        values[name] = st.text_input(f"{label}{status}", type="password",
-                                     placeholder="leave empty to keep the saved key" if cur else "paste key here")
-    submitted = st.form_submit_button("Save keys", type="primary")
+HOSTED = os.environ.get("CALL_ANALYZER_FROM_SECRETS") == "1"
+if HOSTED:
+    st.info("This online version reads its keys from **Streamlit Secrets** (app ⋮ menu → Settings → Secrets "
+            "on share.streamlit.io). Change them there; the app restarts with the new values.")
+else:
+    with st.form("keys", clear_on_submit=True):
+        values = {}
+        for name, label in KEY_NAMES.items():
+            cur = os.environ.get(name, "")
+            status = f" — ✅ saved ({_mask(cur)})" if cur else ""
+            values[name] = st.text_input(f"{label}{status}", type="password",
+                                         placeholder="leave empty to keep the saved key" if cur else "paste key here")
+        submitted = st.form_submit_button("Save keys", type="primary")
 
-if submitted:
-    entered = {n: v.strip().strip('"').strip("'").replace(" ", "") for n, v in values.items() if v.strip()}
-    if not entered:
-        st.session_state["key_msg"] = (False, "Nothing was pasted. Click inside the Groq box, paste (Ctrl+V), then click Save keys.")
-    elif "GROQ_API_KEY" in entered and not entered["GROQ_API_KEY"].startswith("gsk_"):
-        st.session_state["key_msg"] = (False, "That doesn't look like a Groq key: it should start with gsk_. "
-                                              "Copy it again from console.groq.com → API Keys.")
-    else:
-        try:
-            for n, v in entered.items():
-                save_key(n, v)
-            ok, text = _test_groq() if "GROQ_API_KEY" in entered else (True, "")
-            st.session_state["key_msg"] = (ok, f"Saved {len(entered)} key(s). {text}")
-        except OSError as e:
-            st.session_state["key_msg"] = (False, f"Could not write the key file: {e}")
-    st.rerun()
+    if submitted:
+        entered = {n: v.strip().strip('"').strip("'").replace(" ", "") for n, v in values.items() if v.strip()}
+        if not entered:
+            st.session_state["key_msg"] = (False, "Nothing was pasted. Click inside the Groq box, paste (Ctrl+V), then click Save keys.")
+        elif "GROQ_API_KEY" in entered and not entered["GROQ_API_KEY"].startswith("gsk_"):
+            st.session_state["key_msg"] = (False, "That doesn't look like a Groq key: it should start with gsk_. "
+                                                  "Copy it again from console.groq.com → API Keys.")
+        else:
+            try:
+                for n, v in entered.items():
+                    save_key(n, v)
+                ok, text = _test_groq() if "GROQ_API_KEY" in entered else (True, "")
+                st.session_state["key_msg"] = (ok, f"Saved {len(entered)} key(s). {text}")
+            except OSError as e:
+                st.session_state["key_msg"] = (False, f"Could not write the key file: {e}")
+        st.rerun()
 
 if os.environ.get("GROQ_API_KEY") and st.button("Test Groq key"):
     ok, text = _test_groq()
     (st.success if ok else st.error)(text)
 
-st.caption("Keys are saved in a private `.env` file in this app's folder (never uploaded to GitHub). "
-           "In Codespaces they stay with your codespace.")
+if not HOSTED:
+    st.caption("Keys are saved in a private `.env` file in this app's folder (never uploaded to GitHub).")
 
 st.subheader("Current setup")
 t, a = settings["transcription"], settings["analysis"]
 st.markdown(f"- Speech-to-text: **{t['engine']}**" + (f" ({t.get('groq_task', 'translate')})" if t["engine"] == "groq" else "") +
             f"\n- Call review: **{a.get('provider', 'groq')}** · model `{a['groq_model'] if a.get('provider', 'groq') == 'groq' else a['model']}`")
-st.caption(f"To change these, or your company description, edit `{SETTINGS_PATH.name}` in the `config` folder.")
+st.caption(f"To change these, or your company description, edit `config/{SETTINGS_PATH.name}`"
+           + (" in the GitHub repository; the online app updates itself within a minute." if HOSTED else "."))
 with st.expander("All settings"):
     st.json(settings)
 
 st.subheader("Data")
-st.caption(f"Reviews are stored in `{DB_PATH}`. Download the Excel sheet from the Dashboard regularly as a backup.")
+st.caption(f"Reviews are stored in the {store.storage_label()}. "
+           "Download the Excel sheet from the Dashboard regularly as a backup.")
 
 from views.common import export_frame, flatten  # noqa: E402
 from callanalyzer import store  # noqa: E402

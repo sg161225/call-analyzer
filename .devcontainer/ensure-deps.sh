@@ -3,7 +3,7 @@
 # If something is missing (e.g. requirements changed after the image was built),
 # install it, retrying a few times because PyPI can be flaky from Codespaces.
 set -u
-if python -c "import streamlit, groq, pandas, altair, openpyxl, dotenv" 2>/dev/null; then
+if python -c "import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg, sqlalchemy, psycopg2" 2>/dev/null; then
   echo "✅ All packages already installed."
 else
   for i in 1 2 3 4 5; do

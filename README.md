@@ -53,6 +53,42 @@ terminal prints. This needs a network that allows `*.app.github.dev`; many offic
 If you see `streamlit: command not found`, run `bash .devcontainer/ensure-deps.sh` and then
 `bash .devcontainer/start-app.sh` in the Terminal.
 
+## Host it online (free): one link for the whole team
+
+The app can run on **Streamlit Community Cloud** (free), straight from this GitHub repository, with reviews
+kept in a free **Neon** online database. Everyone opens the same link, signs in with a team password, and
+sees the same data. Each push to GitHub updates the online app automatically.
+
+**Step 1: free database (Neon), 3 minutes**
+1. Go to **https://neon.tech** → **Sign up** (you can use your GitHub account). No card needed.
+2. Create a project: any name (e.g. `call-analyzer`), region **AWS Asia Pacific (Singapore)** (closest to India).
+3. On the project dashboard click **Connect**, then copy the **connection string**. It looks like
+   `postgresql://user:password@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`.
+
+**Step 2: deploy the app (Streamlit Community Cloud), 5 minutes**
+1. Go to **https://share.streamlit.io** → **Continue with GitHub** → allow access.
+2. Click **Create app** → **Deploy a public app from GitHub**, and fill in:
+   - Repository: `sg161225/call-analyzer` · Branch: `main` · Main file path: `app.py`
+   - App URL: pick a name, e.g. `busy-call-analyzer`
+3. Open **Advanced settings**, choose Python **3.12**, and paste this into **Secrets** with your own values:
+   ```toml
+   GROQ_API_KEY = "gsk_your_groq_key"
+   DATABASE_URL = "postgresql://...your Neon connection string..."
+   APP_PASSWORD = "choose-a-team-password"
+   ```
+4. Click **Deploy**. The first start takes 3–5 minutes. You get a link like `https://busy-call-analyzer.streamlit.app`.
+
+Share the link and the password with your team. Without the password, people only see the sign-in box.
+
+**Good to know**
+- Change keys or the password later in share.streamlit.io → your app's **⋮** menu → **Settings → Secrets**.
+- On the free plan the app sleeps after a few days without visitors; opening the link shows a
+  "wake up" button and it starts again in about a minute. Your reviews are safe in Neon.
+- Recordings are processed in memory and never stored; only the reviews go into the database.
+- If your office network blocks `*.streamlit.app`, ask IT to allow it, or keep using the Windows version.
+- The online and Windows versions keep separate data unless you also put the same `DATABASE_URL`
+  in the Windows version's `.env` file.
+
 ## First-time setup inside the app (2 minutes)
 
 1. Go to **https://console.groq.com** and sign in (Google or email). It's free and needs no card.
@@ -105,7 +141,7 @@ callanalyzer/
   transcribe.py         Groq / local Whisper / Sarvam / OpenAI engines
   review.py             Scorecard schema + AI prompts (Groq or Claude)
   pipeline.py           upload → transcribe → review → store
-  store.py              SQLite storage
+  store.py              storage (local SQLite file, or online Postgres via DATABASE_URL)
 config/settings.toml    Editable settings
 Start Call Analyzer.bat Windows launcher (installs on first run)
 start-mac-linux.sh      Mac/Linux launcher

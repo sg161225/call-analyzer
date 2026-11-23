@@ -9,5 +9,5 @@ RUN apt-get update \
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --retries 10 --timeout 120 -r /tmp/requirements.txt \
- && python -c "import streamlit, groq, pandas, altair, openpyxl, dotenv; print('packages ok')" \
+ && python -c "import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg, sqlalchemy, psycopg2; print('packages ok')" \
  && ffmpeg -version | head -1

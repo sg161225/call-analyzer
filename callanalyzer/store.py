@@ -1,81 +1,124 @@
-"""SQLite storage for call reviews (no audio, no transcripts)."""
+"""Storage for call reviews (no audio, no transcripts).
+
+Uses a local SQLite file by default (data/calls.db). When the DATABASE_URL setting is present,
+e.g. a free Neon / Supabase Postgres database for the online version, it uses that instead, so
+reviews survive restarts and are shared by everyone using the hosted app.
+"""
 from __future__ import annotations
 
 import json
-import sqlite3
+import os
 from datetime import datetime
+from functools import lru_cache
 
 import pandas as pd
+from sqlalchemy import (Column, Float, Integer, MetaData, Table, Text, create_engine, delete,
+                        inspect, insert, select, text, update)
+from sqlalchemy.engine import Engine
 
 from .config import DATA_DIR, DB_PATH
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS calls (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    uploaded_at   TEXT NOT NULL,
-    file_name     TEXT NOT NULL,
-    executive     TEXT,
-    call_date     TEXT,
-    campaign      TEXT,
-    pitch_version TEXT,
-    duration_sec  REAL,
-    status        TEXT NOT NULL,      -- processing | done | error
-    error         TEXT,
-    review_json   TEXT
-);
-CREATE TABLE IF NOT EXISTS reports (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at  TEXT NOT NULL,
-    scope       TEXT,
-    content_md  TEXT NOT NULL
-);
-"""
+metadata = MetaData()
+calls = Table(
+    "calls", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("uploaded_at", Text, nullable=False),
+    Column("file_name", Text, nullable=False),
+    Column("executive", Text),
+    Column("mobile", Text),
+    Column("call_date", Text),
+    Column("campaign", Text),
+    Column("pitch_version", Text),
+    Column("duration_sec", Float),
+    Column("status", Text, nullable=False),  # processing | done | error
+    Column("error", Text),
+    Column("review_json", Text),
+)
+reports = Table(
+    "reports", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("created_at", Text, nullable=False),
+    Column("scope", Text),
+    Column("content_md", Text, nullable=False),
+)
 
 
-def connect() -> sqlite3.Connection:
+def database_url() -> str:
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if url:
+        # Neon / Supabase / Heroku style URLs -> SQLAlchemy psycopg2 driver.
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg2://" + url[len(prefix):]
+        return url
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
-    _migrate(con)
-    return con
+    return f"sqlite:///{DB_PATH}"
 
 
-def _migrate(con: sqlite3.Connection) -> None:
+def is_online_db() -> bool:
+    return not database_url().startswith("sqlite")
+
+
+def storage_label() -> str:
+    if is_online_db():
+        host = database_url().split("@")[-1].split("/")[0].split("?")[0]
+        return f"online database ({host})"
+    return f"local file {DB_PATH}"
+
+
+@lru_cache(maxsize=4)
+def _engine_for(url: str) -> Engine:
+    eng = create_engine(url, pool_pre_ping=True, future=True)
+    metadata.create_all(eng)
+    _migrate(eng)
+    return eng
+
+
+def engine() -> Engine:
+    return _engine_for(database_url())
+
+
+def _migrate(eng: Engine) -> None:
     """Upgrade databases created by older versions of the app."""
-    cols = {r[1] for r in con.execute("PRAGMA table_info(calls)")}
-    if "mobile" not in cols:
-        con.execute("ALTER TABLE calls ADD COLUMN mobile TEXT")
+    cols = {c["name"] for c in inspect(eng).get_columns("calls")}
+    if "mobile" in cols:
+        return
+    from .filenames import parse_file_name
+    with eng.begin() as con:
+        con.execute(text("ALTER TABLE calls ADD COLUMN mobile TEXT"))
         # Fill in executive / mobile / campaign from file names for calls saved before.
-        from .filenames import parse_file_name
-        for cid, fname, ex, camp in con.execute(
-                "SELECT id, file_name, executive, campaign FROM calls").fetchall():
+        rows = con.execute(text("SELECT id, file_name, executive, campaign FROM calls")).all()
+        for cid, fname, ex, camp in rows:
             g = parse_file_name(fname or "")
-            con.execute("UPDATE calls SET mobile=?, executive=?, campaign=? WHERE id=?",
-                        (g["mobile"] or None, (ex or "").strip() or g["executive"] or None,
-                         (camp or "").strip() or g["campaign"] or None, cid))
-        con.commit()
+            con.execute(update(calls).where(calls.c.id == cid).values(
+                mobile=g["mobile"] or None,
+                executive=(ex or "").strip() or g["executive"] or None,
+                campaign=(camp or "").strip() or g["campaign"] or None))
+
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def add_call(meta: dict) -> int:
-    with connect() as con:
-        cur = con.execute(
-            "INSERT INTO calls (uploaded_at, file_name, executive, mobile, call_date, campaign, pitch_version, status)"
-            " VALUES (?,?,?,?,?,?,?, 'processing')",
-            (datetime.now().isoformat(timespec="seconds"), meta["file_name"], meta.get("executive"),
-             meta.get("mobile"), meta.get("call_date"), meta.get("campaign"), meta.get("pitch_version")))
-        return cur.lastrowid
+    with engine().begin() as con:
+        res = con.execute(insert(calls).values(
+            uploaded_at=_now(), file_name=meta["file_name"], executive=meta.get("executive"),
+            mobile=meta.get("mobile"), call_date=meta.get("call_date"), campaign=meta.get("campaign"),
+            pitch_version=meta.get("pitch_version"), status="processing"))
+        return int(res.inserted_primary_key[0])
 
 
 def save_review(call_id: int, review: dict, duration: float) -> None:
-    with connect() as con:
-        con.execute("UPDATE calls SET status='done', error=NULL, review_json=?, duration_sec=? WHERE id=?",
-                    (json.dumps(review, ensure_ascii=False), duration, call_id))
+    with engine().begin() as con:
+        con.execute(update(calls).where(calls.c.id == call_id).values(
+            status="done", error=None, review_json=json.dumps(review, ensure_ascii=False),
+            duration_sec=float(duration)))
 
 
 def save_error(call_id: int, error: str) -> None:
-    with connect() as con:
-        con.execute("UPDATE calls SET status='error', error=? WHERE id=?", (error[:2000], call_id))
+    with engine().begin() as con:
+        con.execute(update(calls).where(calls.c.id == call_id).values(status="error", error=error[:2000]))
 
 
 def update_meta(call_id: int, **fields) -> None:
@@ -83,8 +126,8 @@ def update_meta(call_id: int, **fields) -> None:
     sets = {k: v for k, v in fields.items() if k in allowed}
     if not sets:
         return
-    with connect() as con:
-        con.execute(f"UPDATE calls SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?", (*sets.values(), call_id))
+    with engine().begin() as con:
+        con.execute(update(calls).where(calls.c.id == int(call_id)).values(**sets))
 
 
 def delete_call(call_id: int) -> None:
@@ -94,35 +137,33 @@ def delete_call(call_id: int) -> None:
 def delete_calls(call_ids: list[int]) -> int:
     if not call_ids:
         return 0
-    with connect() as con:
-        cur = con.execute(f"DELETE FROM calls WHERE id IN ({','.join('?' * len(call_ids))})",
-                          [int(i) for i in call_ids])
-        return cur.rowcount
+    with engine().begin() as con:
+        return con.execute(delete(calls).where(calls.c.id.in_([int(i) for i in call_ids]))).rowcount
 
 
 def delete_all(include_reports: bool = True) -> None:
     """Remove every stored review (and optionally every AI insights report)."""
-    with connect() as con:
-        con.execute("DELETE FROM calls")
+    with engine().begin() as con:
+        con.execute(delete(calls))
         if include_reports:
-            con.execute("DELETE FROM reports")
-    with connect() as con:
-        con.execute("VACUUM")
+            con.execute(delete(reports))
+    if not is_online_db():
+        with engine().connect().execution_options(isolation_level="AUTOCOMMIT") as con:
+            con.execute(text("VACUUM"))
 
 
 def load_calls() -> pd.DataFrame:
-    with connect() as con:
-        df = pd.read_sql_query("SELECT * FROM calls ORDER BY call_date DESC, id DESC", con)
+    with engine().connect() as con:
+        df = pd.read_sql_query(select(calls).order_by(calls.c.call_date.desc(), calls.c.id.desc()), con)
     df["review"] = df["review_json"].apply(lambda s: json.loads(s) if isinstance(s, str) and s else None)
     return df
 
 
 def save_report(scope: str, content_md: str) -> None:
-    with connect() as con:
-        con.execute("INSERT INTO reports (created_at, scope, content_md) VALUES (?,?,?)",
-                    (datetime.now().isoformat(timespec="seconds"), scope, content_md))
+    with engine().begin() as con:
+        con.execute(insert(reports).values(created_at=_now(), scope=scope, content_md=content_md))
 
 
 def load_reports() -> list[dict]:
-    with connect() as con:
-        return [dict(r) for r in con.execute("SELECT * FROM reports ORDER BY id DESC")]
+    with engine().connect() as con:
+        return [dict(r._mapping) for r in con.execute(select(reports).order_by(reports.c.id.desc()))]

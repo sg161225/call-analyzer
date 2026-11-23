@@ -17,7 +17,7 @@ fi
 
 [ -x .venv/bin/python ] || "$PY" -m venv .venv || { echo "Could not create the environment."; exit 1; }
 VPY=.venv/bin/python
-CHECK="import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg"
+CHECK="import streamlit, groq, pandas, altair, openpyxl, dotenv, imageio_ffmpeg, sqlalchemy, psycopg2"
 if ! "$VPY" -c "$CHECK" 2>/dev/null; then
   echo "Installing the app's packages (a few minutes the first time)..."
   for i in 1 2 3; do
