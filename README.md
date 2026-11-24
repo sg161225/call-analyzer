@@ -99,11 +99,25 @@ Share the link and the password with your team. Without the password, people onl
 ## Using it
 
 1. **Upload calls**: drop one or more recordings (wav, mp3, m4a, amr, …).
-2. Check the **call details** table. The executive and campaign are pre-filled from file names like
-   `Sachin9873747581DroppedOct.wav`. Set the call date, and optionally a **pitch version**
-   (e.g. `v1`, `v2 new offer`) whenever the script or offer changes.
+2. Check the **call details** table. The executive, mobile number and campaign are filled in from the file name.
+   Pick the **Call type** (or leave *Auto-detect* and the AI decides), set the call date, and optionally a
+   **pitch version** (e.g. `v1`, `v2 new offer`) whenever the script or offer changes.
 3. Click **Analyse**.
-4. Open the **Dashboard** and **AI insights**.
+
+**Call types:** 🆕 New Sales · 📱 Mobile App · 🔄 Renewal · ⬆️ Upsell · 🤝 CLM (customer life cycle management).
+Each type has its own checklist (edit them in `callanalyzer/calltypes.py`). For every call the AI records the
+outcome, next step and date, the deal value in ₹ mentioned on the call, the loss reason, and the risk of losing
+the customer. Success = payment received for sales types; issue resolved / healthy customer for CLM.
+
+**Pages**
+- **📈 Overview**: switch between call types; KPI cards (conversion, revenue won, pipeline, follow-ups due),
+  sales funnel, *why we lose*, *what wins* (success rate when each checklist item was done vs not), checklist
+  completion and an executive table.
+- **📋 Call reviews**: the scorecard table with your six columns, search by mobile number, executive comparison,
+  pitch over time, and the full review of any call (tick rows to fix details in bulk or delete them).
+- **📅 Follow-ups**: payment promises, demos and callbacks by due date (tick *Done* when completed), plus
+  **at-risk customers** to call before their renewal.
+- **💡 AI insights**: a written report on what's working, what isn't and how to improve, by call type.
 
 ## Free-tier limits
 

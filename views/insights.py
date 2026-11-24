@@ -32,7 +32,7 @@ if settings["analysis"].get("provider", "groq") == "groq" and len(view) > GROQ_M
 if st.button("Generate report", type="primary", disabled=view.empty or not has_key):
     reviews = raw.set_index("id").loc[view["id"]]
     rows = [{"executive": r["executive"], "date": r["call_date"], "campaign": r["campaign"],
-             "pitch_version": r["pitch_version"], **r["review"]} for _, r in reviews.iterrows()]
+             "pitch_version": r["pitch_version"], **r["review"], "call_type": r.get("call_type") or r["review"].get("call_type")} for _, r in reviews.iterrows()]
     with st.spinner(f"Analysing {len(rows)} call reviews… this can take a minute or two."):
         try:
             md = insights_report(rows, settings, focus)

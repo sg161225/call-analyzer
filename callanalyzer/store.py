@@ -26,6 +26,7 @@ calls = Table(
     Column("file_name", Text, nullable=False),
     Column("executive", Text),
     Column("mobile", Text),
+    Column("call_type", Text),
     Column("call_date", Text),
     Column("campaign", Text),
     Column("pitch_version", Text),
@@ -33,6 +34,7 @@ calls = Table(
     Column("status", Text, nullable=False),  # processing | done | error
     Column("error", Text),
     Column("review_json", Text),
+    Column("followup_done", Integer),
 )
 reports = Table(
     "reports", metadata,
@@ -81,19 +83,31 @@ def engine() -> Engine:
 def _migrate(eng: Engine) -> None:
     """Upgrade databases created by older versions of the app."""
     cols = {c["name"] for c in inspect(eng).get_columns("calls")}
-    if "mobile" in cols:
-        return
-    from .filenames import parse_file_name
-    with eng.begin() as con:
-        con.execute(text("ALTER TABLE calls ADD COLUMN mobile TEXT"))
-        # Fill in executive / mobile / campaign from file names for calls saved before.
-        rows = con.execute(text("SELECT id, file_name, executive, campaign FROM calls")).all()
-        for cid, fname, ex, camp in rows:
-            g = parse_file_name(fname or "")
-            con.execute(update(calls).where(calls.c.id == cid).values(
-                mobile=g["mobile"] or None,
-                executive=(ex or "").strip() or g["executive"] or None,
-                campaign=(camp or "").strip() or g["campaign"] or None))
+    if "mobile" not in cols:
+        from .filenames import parse_file_name
+        with eng.begin() as con:
+            con.execute(text("ALTER TABLE calls ADD COLUMN mobile TEXT"))
+            # Fill in executive / mobile / campaign from file names for calls saved before.
+            rows = con.execute(text("SELECT id, file_name, executive, campaign FROM calls")).all()
+            for cid, fname, ex, camp in rows:
+                g = parse_file_name(fname or "")
+                con.execute(update(calls).where(calls.c.id == cid).values(
+                    mobile=g["mobile"] or None,
+                    executive=(ex or "").strip() or g["executive"] or None,
+                    campaign=(camp or "").strip() or g["campaign"] or None))
+    if "followup_done" not in cols:
+        with eng.begin() as con:
+            con.execute(text("ALTER TABLE calls ADD COLUMN followup_done INTEGER"))
+    if "call_type" not in cols:
+        from .calltypes import guess_type_from_purpose
+        with eng.begin() as con:
+            con.execute(text("ALTER TABLE calls ADD COLUMN call_type TEXT"))
+            # Older reviews have no call type: classify from the AI's 'call purpose'.
+            for cid, rj in con.execute(text("SELECT id, review_json FROM calls")).all():
+                if rj:
+                    rv = json.loads(rj)
+                    ct = rv.get("call_type") or guess_type_from_purpose(rv.get("call_purpose", ""))
+                    con.execute(update(calls).where(calls.c.id == cid).values(call_type=ct))
 
 
 def _now() -> str:
@@ -104,7 +118,8 @@ def add_call(meta: dict) -> int:
     with engine().begin() as con:
         res = con.execute(insert(calls).values(
             uploaded_at=_now(), file_name=meta["file_name"], executive=meta.get("executive"),
-            mobile=meta.get("mobile"), call_date=meta.get("call_date"), campaign=meta.get("campaign"),
+            mobile=meta.get("mobile"), call_type=meta.get("call_type") or None,
+            call_date=meta.get("call_date"), campaign=meta.get("campaign"),
             pitch_version=meta.get("pitch_version"), status="processing"))
         return int(res.inserted_primary_key[0])
 
@@ -113,7 +128,7 @@ def save_review(call_id: int, review: dict, duration: float) -> None:
     with engine().begin() as con:
         con.execute(update(calls).where(calls.c.id == call_id).values(
             status="done", error=None, review_json=json.dumps(review, ensure_ascii=False),
-            duration_sec=float(duration)))
+            duration_sec=float(duration), call_type=review.get("call_type")))
 
 
 def save_error(call_id: int, error: str) -> None:
@@ -122,7 +137,7 @@ def save_error(call_id: int, error: str) -> None:
 
 
 def update_meta(call_id: int, **fields) -> None:
-    allowed = {"executive", "mobile", "call_date", "campaign", "pitch_version"}
+    allowed = {"executive", "mobile", "call_type", "call_date", "campaign", "pitch_version", "followup_done"}
     sets = {k: v for k, v in fields.items() if k in allowed}
     if not sets:
         return

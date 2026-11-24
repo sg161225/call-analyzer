@@ -6,6 +6,7 @@ import streamlit as st
 from views.common import load_flat  # noqa: F401  (sets import path)
 from callanalyzer.config import load_settings, missing_keys
 from callanalyzer.pipeline import guess_meta, process_call
+from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer.transcribe import ENGINES
 
 st.title("⬆️ Upload calls")
@@ -21,17 +22,34 @@ if not files:
 
 st.markdown("**Call details**: check and correct these before processing. "
             "Use *Pitch version* to tag a script/offer change (e.g. `v1`, `v2 new offer`) so you can compare before vs after.")
+AUTO = "Auto-detect"
+
+
+def _type_from_campaign(text: str) -> str:
+    t = (text or "").lower()
+    for words, ctype in ((("renew", "tss"), "Renewal"), (("upsell", "upgrade", "addon", "add-on"), "Upsell"),
+                         (("mobile", "app"), "Mobile App"), (("new sale", "newsale", "lead", "enquiry", "inquiry"), "New Sales"),
+                         (("drop", "clm", "onboard", "complaint", "reactiv", "retention"), "CLM")):
+        if any(w in t for w in words):
+            return ctype
+    return AUTO
+
+
 seed = []
 for f in files:
     g = guess_meta(f.name)
-    seed.append({"File": f.name, "Executive": g["executive"], "Mobile": g["mobile"], "Call date": date.today(),
+    seed.append({"File": f.name, "Executive": g["executive"], "Mobile": g["mobile"],
+                 "Call type": _type_from_campaign(g["campaign"] + " " + f.name), "Call date": date.today(),
                  "Campaign": g["campaign"], "Pitch version": ""})
 meta = st.data_editor(
     pd.DataFrame(seed), hide_index=True, width="stretch", num_rows="fixed", key=f"meta_{len(files)}",
     column_config={"File": st.column_config.TextColumn(disabled=True),
                    "Call date": st.column_config.DateColumn(format="DD MMM YYYY", required=True),
                    "Executive": st.column_config.TextColumn(required=True),
-                   "Mobile": st.column_config.TextColumn(help="Customer's mobile number, read from the file name")})
+                   "Mobile": st.column_config.TextColumn(help="Customer's mobile number, read from the file name"),
+                   "Call type": st.column_config.SelectboxColumn(
+                       options=[AUTO, *CALL_TYPES], required=True,
+                       help="Auto-detect lets the AI decide from the conversation")})
 
 c1, c2 = st.columns([2, 3])
 default = list(ENGINES).index(settings["transcription"]["engine"])
@@ -59,6 +77,7 @@ if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(miss
                     "mobile": "".join(ch for ch in str(m.get("Mobile") or "") if ch.isdigit())[-10:],
                     "call_date": d.isoformat() if hasattr(d, "isoformat") else str(d),
                     "campaign": (m["Campaign"] or "").strip(), "pitch_version": (m["Pitch version"] or "").strip(),
+                    "call_type": None if m.get("Call type") in (None, AUTO) else m["Call type"],
                 }, settings, engine)
                 s.update(label=f"{f.name}: done ✅", state="complete")
                 ok += 1
@@ -67,4 +86,4 @@ if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(miss
                 st.write(f"{type(e).__name__}: {e}")
         progress.progress((i + 1) / len(files))
     st.success(f"{ok} of {len(files)} call(s) reviewed.")
-    st.page_link("views/dashboard.py", label="Open the dashboard →", icon="📊")
+    st.page_link("views/overview.py", label="Open the overview →", icon="📈")

@@ -4,7 +4,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from views.common import BADGE, PARAMETERS, RATED, badge, export_frame, filters, load_flat
+from views.common import BADGE, PARAMETERS, RATED, badge, checklist_summary, export_frame, filters, inr, load_flat
+from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer import store
 
 # Status colours (good / warning / critical), always shown with a label.
@@ -26,7 +27,7 @@ def confirm_delete(ids: list[int]) -> None:
         st.rerun()
 
 
-st.title("📊 Call review dashboard")
+st.title("📋 Call reviews")
 raw, flat = load_flat()
 
 failed = raw[raw["status"] == "error"]
@@ -52,8 +53,8 @@ if view.empty:
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Calls reviewed", len(view))
 k2.metric("Average score", f"{view['Score'].mean():.1f} / 10")
-k3.metric("Positive outcome", f"{view['Outcome'].isin(POSITIVE).mean():.0%}",
-          help="Converted / retained, issue resolved, or follow-up scheduled")
+k3.metric("Positive outcome", f"{view['Positive'].mean():.0%}",
+          help="Payment received or promised, demo booked, follow-up agreed, or issue resolved")
 weakest = min(RATED, key=lambda k: view[f"{k}__score"].mean(skipna=True) if view[f"{k}__score"].notna().any() else 9)
 SHORT = {"business_probing": "Probing", "need_generation": "Need gen.", "pitch": "Pitch",
          "customer_queries": "Queries", "objection_handling": "Objections"}
@@ -66,8 +67,9 @@ with tab_calls:
     show_notes = st.toggle("Show notes in table", value=False,
                            help="Off: ratings only. Tick a row to see its full review below.")
     table = pd.DataFrame({
-        "Date": view["Date"].dt.strftime("%d %b %Y"), "Executive": view["Executive"],
-        "Mobile": view["Mobile"], "Customer": view["Customer"], "Outcome": view["Outcome"], "Score": view["Score"],
+        "Date": view["Date"].dt.strftime("%d %b %Y"),
+        "Type": view["Call type"].map(lambda t: f"{CALL_TYPES.get(t, {}).get('icon', '')} {t}"),
+        "Executive": view["Executive"], "Mobile": view["Mobile"], "Customer": view["Customer"], "Outcome": view["Outcome"], "Score": view["Score"],
     })
     for key, label in PARAMETERS.items():
         if key in RATED:
@@ -97,9 +99,10 @@ with tab_calls:
         with st.form("bulk_edit", border=True):
             st.caption("Fix call details for the ticked calls. Leave a box empty to keep what's there.")
             one = len(ids) == 1
-            cols = st.columns(5 if one else 4)
-            c1, c2, c3, c4 = cols[:4]
-            mob = cols[4].text_input("Mobile") if one else ""
+            cols = st.columns(6 if one else 5)
+            c1, c2, c3, c4, c5 = cols[:5]
+            ct = c5.selectbox("Call type", ["(keep)", *CALL_TYPES])
+            mob = cols[5].text_input("Mobile") if one else ""
             ex = c1.text_input("Executive")
             dt = c2.date_input("Call date", value=None, format="DD/MM/YYYY")
             cp = c3.text_input("Campaign")
@@ -107,6 +110,7 @@ with tab_calls:
             if st.form_submit_button(f"✏️ Apply to {len(ids)} call(s)"):
                 fields = {k: v for k, v in {"executive": ex.strip(), "campaign": cp.strip(), "mobile": mob.strip(),
                                             "pitch_version": pv.strip(),
+                                            "call_type": "" if ct == "(keep)" else ct,
                                             "call_date": dt.isoformat() if dt else ""}.items() if v}
                 for i in ids:
                     store.update_meta(i, **fields)
@@ -124,6 +128,31 @@ with tab_calls:
                    f"{r['Minutes']} min · Score {rv['overall_score']}/10"
                    + (f" · 📱 **{r['Mobile']}**" if r["Mobile"] else "") + f" · File: `{r['File']}`")
         st.write(rv["one_line_summary"])
+        icon = CALL_TYPES.get(r["Call type"], {}).get("icon", "")
+        due = f" · due {r['Next step date']:%d %b}" if pd.notna(r["Next step date"]) else ""
+        def card(col, label: str, value: str, note: str = "") -> None:
+            with col.container(border=True):
+                st.caption(label)
+                st.markdown(f"**{value}**" + (f"  \n<span style='opacity:.7;font-size:.85em'>{note}</span>" if note else ""),
+                            unsafe_allow_html=True)
+
+        cards = st.columns(4)
+        card(cards[0], "Call type", f"{icon} {r['Call type']}")
+        card(cards[1], "Outcome", r["Outcome"],
+             "" if r["Loss reason"] in ("None", "") else f"Loss reason: {r['Loss reason']}")
+        card(cards[2], "Deal value", inr(r["Deal value"]) if r["Deal value"] else "—", r["Deal note"])
+        card(cards[3], "Risk", {"High": "🔴 High", "Medium": "🟠 Medium", "Low": "🟢 Low"}.get(r["Risk"], "None"),
+             r["Risk reason"])
+        if r["Next step"]:
+            st.info(f"**Next step{due}:** {r['Next step']}")
+        if r["Checklist"]:
+            with st.container(border=True):
+                st.markdown(f"**{r['Call type']} checklist** — {checklist_summary(r['Checklist']).split(' · ')[0]}")
+                for c in r["Checklist"]:
+                    mark = {"Yes": "✅", "No": "❌"}.get(c["done"], "➖")
+                    ev = c.get("evidence", "")
+                    st.markdown(f"{mark} {c['item']}" + (f" <span style='opacity:.65;font-size:.88em'>· {ev}</span>" if ev else ""),
+                                unsafe_allow_html=True)
         for key, label in PARAMETERS.items():
             with st.container(border=True):
                 a = rv.get(key)

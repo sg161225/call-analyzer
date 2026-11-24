@@ -6,6 +6,8 @@ from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
+from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, checklist_prompt
+
 Rating = Literal["Good", "Partial", "Weak", "Not applicable"]
 RATING_SCORE = {"Good": 3, "Partial": 2, "Weak": 1}
 
@@ -37,11 +39,26 @@ class Queries(BaseModel):
     unresolved: List[str] = Field(description="Queries that were left unanswered or unresolved")
 
 
+class ChecklistItem(BaseModel):
+    item: str = Field(description="Checklist item, copied exactly from the list for this call type")
+    done: Literal["Yes", "No", "Not applicable"]
+    evidence: str = Field(description="Very short evidence from the call (or why it was missed)")
+
+
 class CallReview(BaseModel):
+    call_type: Literal[tuple(CALL_TYPES)] = Field(description="Which of the five call types this call is")
     customer_name: str = Field(description="Customer / business name if mentioned, else empty")
-    call_purpose: str = Field(description="e.g. Retention of dropped customer, Renewal, Upsell, Complaint, New sale")
-    outcome: Literal["Converted / Retained", "Follow-up scheduled", "Undecided", "Not interested / Lost", "Issue resolved", "Unclear"]
+    call_purpose: str = Field(description="Short purpose, e.g. 'Renewal of yearly licence', 'Reactivating dropped customer'")
+    checklist: List[ChecklistItem] = Field(description="Every checklist item for this call type, in order")
+    outcome: Literal[tuple(OUTCOMES)] = Field(description="How the call ended. 'Payment received' only if the customer confirms the payment is done")
     outcome_note: str = Field(description="One sentence on how the call ended and why")
+    next_step: str = Field(description="Agreed next step, e.g. 'Customer will pay via payment link', 'Demo on Friday 4pm'. Empty if none")
+    next_step_date: str = Field(description="Date of the next step as YYYY-MM-DD, worked out from the call date if said relatively ('tomorrow', 'Monday'). Empty if none")
+    deal_value_inr: int = Field(description="Price/amount in rupees discussed for this deal (final quoted or agreed amount). 0 if no amount was mentioned")
+    deal_value_note: str = Field(description="What the amount is for, e.g. '1-year renewal, 2 users'. Empty if none")
+    loss_reason: Literal[tuple(LOSS_REASONS)] = Field(description="Main reason the customer did not buy / is unhappy; 'None' if not applicable")
+    risk_level: Literal[tuple(RISK_LEVELS)] = Field(description="Risk of losing this customer (unhappy, not using, mentions switching or not renewing)")
+    risk_reason: str = Field(description="Why, in one line. Empty if risk is None")
     customer_sentiment_start: Literal["Positive", "Neutral", "Negative"]
     customer_sentiment_end: Literal["Positive", "Neutral", "Negative"]
     business_probing: Assessment
@@ -62,7 +79,15 @@ company's caller) and who is the customer from context. Write all output in clea
 Company context:
 {context}
 
-Review the call against this scorecard:
+First decide the call type (one of: New Sales, Mobile App, Renewal, Upsell, CLM). If the call
+metadata gives a call type, use it. Then fill in the checklist for THAT type, copying each item
+exactly, marking Yes / No / Not applicable:
+{checklists}
+
+Outcome rules: 'Payment received' only when the customer confirms payment is made during the call;
+a promise to pay is 'Payment promised'. Capture any rupee amount quoted or agreed as deal_value_inr.
+
+Then review the call against this scorecard:
 - Business probing: did the executive understand the customer's business (type, size, volume,
   current process/software, users, decision maker) before pitching?
 - Need generation: did they uncover or build a need/pain and link it to the product?
@@ -129,12 +154,49 @@ def _review_groq(system: str, user: str, settings: dict) -> dict:
         return CallReview.model_validate_json(raw).model_dump()
 
 
+def normalize(rv: dict, forced_type: str | None = None) -> dict:
+    """Make AI output consistent: chosen call type wins, checklist matches the official items
+    in order, date and amount are valid."""
+    import difflib
+    from datetime import date
+
+    if forced_type in CALL_TYPES:
+        rv["call_type"] = forced_type
+    official = CHECKLISTS.get(rv.get("call_type"), [])
+    given = {(c.get("item") or "").strip().lower(): c for c in rv.get("checklist") or []}
+    fixed = []
+    for item in official:
+        key = item.lower()
+        match = given.get(key)
+        if match is None:
+            close = difflib.get_close_matches(key, list(given), n=1, cutoff=0.8)
+            match = given.get(close[0]) if close else None
+        fixed.append({"item": item, "done": (match or {}).get("done", "No"),
+                      "evidence": (match or {}).get("evidence", "Not covered in the call")})
+    rv["checklist"] = fixed
+    d = (rv.get("next_step_date") or "").strip()
+    try:
+        rv["next_step_date"] = date.fromisoformat(d).isoformat() if d else ""
+    except ValueError:
+        rv["next_step_date"] = ""
+    try:
+        rv["deal_value_inr"] = max(0, int(rv.get("deal_value_inr") or 0))
+    except (TypeError, ValueError):
+        rv["deal_value_inr"] = 0
+    return rv
+
+
 def review_call(transcript: str, meta: dict, settings: dict) -> dict:
+    return normalize(_review_call(transcript, meta, settings), meta.get("call_type"))
+
+
+def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
     company = settings["company"]
     context = f"{company['name']}: {company['product']}\n{company['context'].strip()}"
+    hint = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else "not given (decide from the call)"
     user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
-            f"campaign={meta.get('campaign') or 'unknown'}\n\n<transcript>\n{transcript}\n</transcript>")
-    system = SYSTEM.format(context=context)
+            f"campaign={meta.get('campaign') or 'unknown'}, call type={hint}\n\n<transcript>\n{transcript}\n</transcript>")
+    system = SYSTEM.format(context=context, checklists=checklist_prompt())
     if _provider(settings) == "groq":
         return _review_groq(system, user, settings)
     resp = _client().beta.messages.parse(
@@ -156,7 +218,10 @@ def review_call(transcript: str, meta: dict, settings: dict) -> dict:
 
 INSIGHTS_SYSTEM = """You are the head of quality for an Indian software company's tele-calling team.
 You get structured reviews of many calls (one JSON object per call, with executive, date, campaign,
-pitch version, ratings and notes). Write a concise, practical report for the sales manager in
+pitch version, call type, checklist, outcome, deal value, ratings and notes). Call types are New Sales,
+Mobile App, Renewal, Upsell and CLM (customer life cycle management). Success means payment received
+for sales types, and an issue resolved / healthy customer for CLM. Compare like with like: always say
+which call type a finding applies to. Write a concise, practical report for the sales manager in
 Markdown with these sections:
 
 1. **Headline**: 3 bullets with the most important findings.
@@ -179,8 +244,10 @@ GROQ_MAX_CALLS = 20  # keeps one report inside the free tier's per-request token
 def compact(row: dict) -> dict:
     """Shorter version of a review for the free tier."""
     cut = lambda t, n=160: (t or "")[:n]
-    out = {k: row.get(k) for k in ("executive", "date", "campaign", "pitch_version", "call_purpose",
-                                   "outcome", "overall_score", "customer_sentiment_start", "customer_sentiment_end")}
+    out = {k: row.get(k) for k in ("executive", "date", "campaign", "pitch_version", "call_type", "call_purpose",
+                                   "outcome", "loss_reason", "deal_value_inr", "risk_level", "overall_score",
+                                   "customer_sentiment_start", "customer_sentiment_end")}
+    out["checklist_missed"] = [c["item"][:60] for c in row.get("checklist") or [] if c.get("done") == "No"][:5]
     for k in ("business_probing", "need_generation", "objection_handling"):
         a = row.get(k) or {}
         out[k] = {"rating": a.get("rating"), "observed": cut(a.get("observed"))}
