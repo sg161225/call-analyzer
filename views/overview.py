@@ -4,7 +4,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from views import achieve
+from views import achieve, quality_view
 from views.common import inr, load_flat
 from callanalyzer.calltypes import CALL_TYPES, CHECKLISTS, CLM_TYPES, FUNNEL_STAGES, SALES_TYPES, STAGE_OF_OUTCOME
 from callanalyzer.playbook import PLAYBOOKS
@@ -104,6 +104,11 @@ if not is_clm and len(sales):
     st.caption(f"💰 Pipeline (payment promised): **{inr(pipe)}** · "
                f"⚠️ At-risk customers: **{len(at_risk)}** · Success = payment received")
 
+n_fatal = int((view["Fatal"] == True).sum())  # noqa: E712
+if n_fatal:
+    st.markdown(f"<div style='color:#d03b3b;font-weight:600;margin:-4px 0 8px'>⛔ {n_fatal} fatal call(s) in this "
+                f"view: see <i>Soft skills &amp; fatal calls</i> below.</div>", unsafe_allow_html=True)
+
 # ---- row 1: funnel / outcomes + calls by type or why we lose -------------------------
 left, right = st.columns(2, gap="large")
 with left:
@@ -159,6 +164,10 @@ with right:
 if ctype in CHECKLISTS:
     st.divider()
     achieve.render(view, ctype)
+
+# ---- soft skills & fatal calls ---------------------------------------------------------
+st.divider()
+quality_view.render(view)
 
 # ---- what wins -------------------------------------------------------------------------
 st.divider()

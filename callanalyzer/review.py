@@ -7,6 +7,7 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 
 from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, canonical_type, checklist_prompt
+from .quality import match_fatal, quality_prompt
 from .playbook import OTHER, PLAYBOOKS, objection_names, playbook_prompt, responses_for
 
 Rating = Literal["Good", "Partial", "Weak", "Not applicable"]
@@ -55,6 +56,22 @@ class ObjectionHandled(BaseModel):
     recommended_response: str = Field(description="The best playbook response for this moment, in the playbook's Hinglish, adapted to this customer")
 
 
+class SkillRating(BaseModel):
+    rating: Literal["Good", "Partial", "Weak"]
+    evidence: str = Field(description="Short evidence from the call (quote or description)")
+
+
+class SoftSkills(BaseModel):
+    empathy: SkillRating
+    humility: SkillRating = Field(description="Humility & courtesy")
+    fluency: SkillRating = Field(description="Fluency & confidence (no fumbling)")
+
+
+class FatalError(BaseModel):
+    category: str = Field(description="Fatal error category, copied exactly from the list")
+    evidence: str = Field(description="Short quote or description of what the executive said or did")
+
+
 class CallReview(BaseModel):
     call_type: Literal[tuple(CALL_TYPES)] = Field(description="Which of the five call types this call is")
     customer_name: str = Field(description="Customer / business name if mentioned, else empty")
@@ -78,6 +95,8 @@ class CallReview(BaseModel):
     objection_handling: Assessment
     objections: List[ObjectionHandled] = Field(
         description="Every objection the customer raised, checked against the playbook. Empty list if none, or if no playbook applies")
+    soft_skills: SoftSkills
+    fatal_errors: List[FatalError] = Field(description="Every fatal error (blunder) the executive committed. Empty list if none")
     acpt_improvement: List[str] = Field(description="Top 3-6 prioritised improvements for the executive, most important first, each actionable")
     overall_score: int = Field(description="Overall call quality from 1 (very poor) to 10 (excellent)")
     one_line_summary: str = Field(description="One-line summary of the call for a manager")
@@ -114,6 +133,8 @@ Then review the call against this scorecard:
 
 Objections: {playbook}
 - ACPT improvement required: the prioritised coaching points for the executive.
+
+{quality}
 
 Rate each parameter Good / Partial / Weak strictly and consistently, so that ratings are
 comparable across executives and dates. Base every judgement on evidence in the transcript;
@@ -235,6 +256,12 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
         objs.append({**o, "objection": name, "recommended_response": rec,
                      "playbook_followed": o.get("playbook_followed") if o.get("playbook_followed") in ("Yes", "Partly", "No") else "No"})
     rv["objections"] = objs
+    fatal = []
+    for f in rv.get("fatal_errors") or []:
+        if (f.get("category") or f.get("evidence") or "").strip():
+            fatal.append({"category": match_fatal((f.get("category") or "").strip()), "evidence": f.get("evidence", "")})
+    rv["fatal_errors"] = fatal
+    rv["fatal"] = bool(fatal)
     d = (rv.get("next_step_date") or "").strip()
     try:
         rv["next_step_date"] = date.fromisoformat(d).isoformat() if d else ""
@@ -288,7 +315,7 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
               "objection name from THAT type's playbook (or 'Other'), and judge whether the executive used the "
               "recommended responses. For any other call type return an empty objections list.\n"
               + playbook_prompt(forced))
-    system = SYSTEM.format(context=context, types=", ".join(CALL_TYPES),
+    system = SYSTEM.format(context=context, types=", ".join(CALL_TYPES), quality=quality_prompt(),
                            checklists=checklist_prompt(forced), playbook=pb)
     if _provider(settings) == "groq":
         return _review_groq(system, user, settings)
@@ -311,7 +338,9 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
 
 INSIGHTS_SYSTEM = """You are the head of quality for an Indian software company's tele-calling team.
 You get structured reviews of many calls (one JSON object per call, with executive, date, campaign,
-pitch version, call type, checklist, outcome, deal value, ratings and notes). Call types are New Sales,
+pitch version, call type, checklist, outcome, deal value, soft skills, fatal errors, ratings and notes).
+A call with any fatal error (a blunder such as rudeness, no empathy at a critical moment or bad fumbling) is a
+FATAL call: always report fatal calls by executive and the most common fatal errors. Call types are New Sales,
 Mobile App, Renewal, Upsell, CLM Onboarding (welcome/setup calls to new customers) and CLM Existing
 (service calls to existing customers). Success means payment received for sales types, onboarding completed
 for CLM Onboarding, and an issue resolved / healthy customer for CLM Existing. Compare like with like: always say
@@ -343,6 +372,9 @@ def compact(row: dict) -> dict:
                                    "customer_sentiment_start", "customer_sentiment_end")}
     out["checklist_missed"] = [c["item"][:60] for c in row.get("checklist") or [] if c.get("done") == "No"][:5]
     out["objections"] = [f"{o.get('objection')}: playbook {o.get('playbook_followed')}" for o in row.get("objections") or []][:5]
+    ss = row.get("soft_skills") or {}
+    out["soft_skills"] = {k: (ss.get(k) or {}).get("rating") for k in ("empathy", "humility", "fluency")}
+    out["fatal_errors"] = [f.get("category") for f in row.get("fatal_errors") or []]
     for k in ("business_probing", "need_generation", "objection_handling"):
         a = row.get(k) or {}
         out[k] = {"rating": a.get("rating"), "observed": cut(a.get("observed"))}

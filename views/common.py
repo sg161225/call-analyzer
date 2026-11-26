@@ -53,6 +53,13 @@ def flatten(df: pd.DataFrame) -> pd.DataFrame:
             "Success": is_success(ctype, row["Outcome"], risk), "Positive": is_positive(row["Outcome"]),
             "Follow-up done": _flag(r.get("followup_done")),
             "Objections": rv.get("objections") or [],
+            # Soft skills / fatal: None when the call was reviewed before these checks existed.
+            "Assessed": "soft_skills" in rv,
+            "Fatal": bool(rv.get("fatal_errors")) if "soft_skills" in rv else None,
+            "Fatal errors": rv.get("fatal_errors") or [],
+            "Empathy": ((rv.get("soft_skills") or {}).get("empathy") or {}).get("rating"),
+            "Humility": ((rv.get("soft_skills") or {}).get("humility") or {}).get("rating"),
+            "Fluency": ((rv.get("soft_skills") or {}).get("fluency") or {}).get("rating"),
             "Playbook %": _playbook_score(rv.get("objections") or []),
         })
         for key in RATED:
@@ -83,6 +90,11 @@ def _playbook_score(objs: list) -> float | None:
     """Share of objections handled the playbook way (Partly counts half). None if no objections."""
     pts = [PLAYBOOK_POINTS[o["playbook_followed"]] for o in objs if o.get("playbook_followed") in PLAYBOOK_POINTS]
     return sum(pts) / len(pts) if pts else None
+
+
+def fatal_summary(errs: list) -> str:
+    from callanalyzer.quality import SHORT_FATAL
+    return "; ".join(f"{SHORT_FATAL.get(e.get('category'), e.get('category'))}: {e.get('evidence', '')}" for e in errs or [])
 
 
 def objections_summary(objs: list) -> str:
@@ -158,6 +170,10 @@ def export_frame(flat: pd.DataFrame) -> pd.DataFrame:
             "Deal value (₹)": flat["Deal value"], "Loss reason": flat["Loss reason"].replace("None", ""),
             "Risk": flat["Risk"].replace("None", ""), "Checklist": flat["Checklist"].map(checklist_summary),
             "Objections (playbook)": flat["Objections"].map(objections_summary),
+            "FATAL": flat["Fatal"].map({True: "FATAL", False: "", None: ""}),
+            "Fatal errors": flat["Fatal errors"].map(fatal_summary),
+            "Empathy": flat["Empathy"].fillna(""), "Humility & courtesy": flat["Humility"].fillna(""),
+            "Fluency & confidence": flat["Fluency"].fillna(""),
             "Score (1-10)": flat["Score"]}
     for key, label in PARAMETERS.items():
         text = flat[f"{key}__text"]

@@ -6,6 +6,7 @@ import streamlit as st
 
 from views.common import BADGE, PARAMETERS, RATED, badge, checklist_summary, export_frame, filters, inr, load_flat
 from callanalyzer.calltypes import CALL_TYPES
+from callanalyzer.quality import SHORT_FATAL, SOFT_SKILLS
 from callanalyzer import store
 
 # Status colours (good / warning / critical), always shown with a label.
@@ -45,6 +46,8 @@ if flat.empty:
     st.stop()
 
 view = filters(flat, "dash")
+if st.toggle("⛔ Fatal calls only", key="dash_fatal", help="Calls where the executive made a blunder (see Overview)"):
+    view = view[view["Fatal"] == True]  # noqa: E712
 if view.empty:
     st.warning("No calls match these filters.")
     st.stop()
@@ -67,6 +70,7 @@ with tab_calls:
     show_notes = st.toggle("Show notes in table", value=False,
                            help="Off: ratings only. Tick a row to see its full review below.")
     table = pd.DataFrame({
+        "⛔": view["Fatal"].map({True: "⛔ FATAL", False: "", None: ""}),
         "Date": view["Date"].dt.strftime("%d %b %Y"),
         "Type": view["Call type"].map(lambda t: f"{CALL_TYPES.get(t, {}).get('icon', '')} {t}"),
         "Executive": view["Executive"], "Mobile": view["Mobile"], "Customer": view["Customer"], "Outcome": view["Outcome"], "Score": view["Score"],
@@ -128,6 +132,21 @@ with tab_calls:
                    f"{r['Minutes']} min · Score {rv['overall_score']}/10"
                    + (f" · 📱 **{r['Mobile']}**" if r["Mobile"] else "") + f" · File: `{r['File']}`")
         st.write(rv["one_line_summary"])
+        if r["Fatal"]:
+            lines = "".join(f"<li><b>{SHORT_FATAL.get(e['category'], e['category'])}</b>: “{e.get('evidence', '')}”</li>"
+                            for e in r["Fatal errors"])
+            st.markdown(f"""<div style="border:2px solid #d03b3b;border-radius:10px;padding:10px 16px;margin:6px 0 12px;
+background:rgba(208,59,59,.08)"><b>⛔ FATAL CALL</b>: the executive made a blunder on this call<ul style="margin:6px 0 0">{lines}</ul></div>""",
+                        unsafe_allow_html=True)
+        if r["Assessed"]:
+            ss = rv.get("soft_skills") or {}
+            cols = st.columns(3)
+            for col_, key in zip(cols, ["empathy", "humility", "fluency"]):
+                sk = ss.get(key) or {}
+                with col_.container(border=True):
+                    st.caption(SOFT_SKILLS[key][0])
+                    st.markdown(f"**{badge(sk.get('rating'))}**  \n<span style='opacity:.7;font-size:.88em'>{sk.get('evidence', '')}</span>",
+                                unsafe_allow_html=True)
         icon = CALL_TYPES.get(r["Call type"], {}).get("icon", "")
         due = f" · due {r['Next step date']:%d %b}" if pd.notna(r["Next step date"]) else ""
         def card(col, label: str, value: str, note: str = "") -> None:
