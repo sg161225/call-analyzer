@@ -4,6 +4,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from views import achieve
 from views.common import inr, load_flat
 from callanalyzer.calltypes import CALL_TYPES, CHECKLISTS, CLM_TYPES, FUNNEL_STAGES, SALES_TYPES, STAGE_OF_OUTCOME
 from callanalyzer.playbook import PLAYBOOKS
@@ -110,10 +111,11 @@ with left:
         st.markdown(f"**How {ctype} calls ended**")
         oc = view["Outcome"].value_counts().rename_axis("Outcome").reset_index(name="Calls")
         chart = alt.Chart(oc).mark_bar(color=BLUE, cornerRadiusEnd=4).encode(
-            y=alt.Y("Outcome:N", sort="-x", title=None), x=alt.X("Calls:Q", title="Calls", axis=alt.Axis(tickMinStep=1)),
+            y=alt.Y("Outcome:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
+            x=alt.X("Calls:Q", title="Calls", axis=alt.Axis(tickMinStep=1)),
             tooltip=["Outcome", "Calls"])
         st.altair_chart((chart + chart.mark_text(align="left", dx=4).encode(text="Calls:Q", color=alt.value("#52514e"))
-                         ).properties(height=34 * len(oc) + 30), width="stretch")
+                         ).properties(height=max(140, 40 * len(oc) + 30)), width="stretch")
     else:
         st.markdown("**Sales funnel**" + ("" if ctype != "All" else " (all sales types)"))
         base = sales if len(sales) else view
@@ -139,7 +141,7 @@ with right:
                             legend=None),
             tooltip=["Call type", "Calls", alt.Tooltip("Score:Q", format=".1f", title="Avg score")])
         st.altair_chart((chart + chart.mark_text(align="left", dx=4).encode(text="Label:N", color=alt.value("#52514e"))
-                         ).properties(height=40 * len(bt) + 20), width="stretch")
+                         ).properties(height=max(140, 40 * len(bt) + 20)), width="stretch")
     else:
         st.markdown("**Why we lose** (main reason in calls that didn't succeed)")
         lost = view[(~view["Success"]) & (view["Loss reason"] != "None")]
@@ -151,7 +153,12 @@ with right:
                 y=alt.Y("Reason:N", sort="-x", title=None, axis=alt.Axis(labelLimit=260)),
                 x=alt.X("Calls:Q", title=None, axis=alt.Axis(tickMinStep=1)), tooltip=["Reason", "Calls"])
             st.altair_chart((chart + chart.mark_text(align="left", dx=4).encode(text="Calls:Q", color=alt.value("#52514e"))
-                             ).properties(height=34 * len(lr) + 30), width="stretch")
+                             ).properties(height=max(140, 40 * len(lr) + 30)), width="stretch")
+
+# ---- achieved vs missed (checklist) -----------------------------------------------------
+if ctype in CHECKLISTS:
+    st.divider()
+    achieve.render(view, ctype)
 
 # ---- what wins -------------------------------------------------------------------------
 st.divider()
@@ -160,6 +167,9 @@ measure = st.radio("Count as success", ["Strict", "Positive outcome"], horizonta
                    captions=["Payment received (CLM: onboarding completed / resolved / healthy)",
                              "Also payment promised, demo booked, follow-up agreed"])
 col = "Success" if measure == "Strict" else "Positive"
+n_ok, n_bad = int(view[col].sum()), int((~view[col]).sum())
+MIN_CALLS, MIN_EACH = 6, 2
+enough_overall = len(view) >= MIN_CALLS and n_ok >= MIN_EACH and n_bad >= MIN_EACH
 rows = []
 if ctype in CHECKLISTS:
     for i, item in enumerate(CHECKLISTS[ctype]):
@@ -182,7 +192,11 @@ long = ww.melt(id_vars=["Behaviour", "n_with", "n_without", "Enough data"], valu
                var_name="Did it?", value_name="Rate").dropna(subset=["Rate"])
 long["Did it?"] = long["Did it?"].map({"With": "Did it", "Without": "Didn't"})
 long["n"] = long.apply(lambda r: r.n_with if r["Did it?"] == "Did it" else r.n_without, axis=1)
-if long.empty:
+if not enough_overall:
+    st.info(f"**Not enough calls to compare yet.** This needs at least {MIN_CALLS} calls with at least "
+            f"{MIN_EACH} successful and {MIN_EACH} unsuccessful ones. So far: {len(view)} call(s), "
+            f"{n_ok} successful, {n_bad} not. Until then, use **Achieved vs missed** above.")
+elif long.empty:
     st.info("Not enough calls yet to compare.")
 else:
     order = ww.sort_values("Difference", ascending=False, na_position="last")["Behaviour"].tolist()
@@ -274,26 +288,10 @@ if ctype in PLAYBOOKS:
                    "answered, and the playbook line they should have used.")
 
 # ---- checklist completion + executive table --------------------------------------------
-left, right = st.columns(2, gap="large")
+left, right = (st.container(), st.container()) if ctype in CHECKLISTS else st.columns(2, gap="large")
 with left:
     if ctype in CHECKLISTS:
-        st.markdown(f"**{ctype} checklist: how often each item is done**")
-        comp = []
-        for item in CHECKLISTS[ctype]:
-            done = view["Checklist"].map(lambda cl: next((c["done"] for c in cl if c["item"] == item), None))
-            app = done.isin(["Yes", "No"])
-            if app.any():
-                comp.append({"Item": item, "Done": (done[app] == "Yes").mean(), "Calls": int(app.sum())})
-        if comp:
-            cdf = pd.DataFrame(comp)
-            chart = alt.Chart(cdf).mark_bar(color=BLUE, cornerRadiusEnd=4).encode(
-                y=alt.Y("Item:N", sort="x", title=None, axis=alt.Axis(labelLimit=300)),
-                x=alt.X("Done:Q", title=None, axis=alt.Axis(format="%"), scale=alt.Scale(domain=[0, 1])),
-                tooltip=["Item", alt.Tooltip("Done:Q", format=".0%"), "Calls"])
-            st.altair_chart((chart + chart.mark_text(align="left", dx=4).encode(
-                text=alt.Text("Done:Q", format=".0%"), color=alt.value("#52514e"))).properties(height=max(140, 32 * len(cdf))), width="stretch")
-        else:
-            st.caption("No checklist data yet for these calls (reviews made before call types existed).")
+        pass
     else:
         st.markdown("**Average score by call type and executive**")
         hm = view.groupby(["Executive", "Call type"], as_index=False).agg(Score=("Score", "mean"), Calls=("id", "size"))
@@ -306,7 +304,7 @@ with left:
                                                   color=alt.condition("datum.Score > 6", alt.value("white"), alt.value("#0b0b0b")))
         ).properties(height=max(120, 40 * hm["Executive"].nunique())), width="stretch")
 with right:
-    st.markdown("**Executives**")
+    st.markdown("**Executives** · calls, score, success and revenue")
     ex = view.groupby("Executive").agg(Calls=("id", "size"), Score=("Score", "mean"),
                                        Success=("Success", "mean"), Checklist=("Checklist %", "mean"),
                                        Revenue=("Deal value", lambda s: s[view.loc[s.index, "Outcome"] == "Payment received"].sum()))

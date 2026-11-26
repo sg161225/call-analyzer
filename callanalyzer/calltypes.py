@@ -158,3 +158,90 @@ def checklist_prompt(only: str | None = None) -> str:
         lines.append(f"{t} ({CALL_TYPES[t]['about']}):")
         lines += [f"  - {i}" for i in items]
     return "\n".join(lines)
+
+
+# Checklist sections (for the achieve/miss dashboard) and short column labels.
+# Each section lists item numbers (1-based, in CHECKLISTS order). CLM Onboarding follows the CRM form.
+SECTIONS: dict[str, list[tuple[str, list[int]]]] = {
+    "New Sales": [("Opening", [1]), ("Discovery", [2, 3]), ("Pitch & pricing", [4, 5]),
+                  ("Objections", [6]), ("Close", [7, 8])],
+    "Mobile App": [("Discovery", [1]), ("Pitch & pricing", [2, 3, 5]), ("Objections", [4]), ("Close", [6])],
+    "Renewal": [("Account & value", [1, 2]), ("Issues", [3]), ("Offer & objections", [4, 5]), ("Close", [6])],
+    "Upsell": [("Discovery", [1, 2]), ("Value", [3, 4]), ("Close", [5])],
+    "CLM Onboarding": [("Welcome & setup", [1, 2]), ("Recovery details", [3, 4, 5]),
+                       ("Support awareness", [6, 7, 8, 9]), ("Business details", [10, 11, 12]),
+                       ("Accounting details", [13, 14, 15]), ("Next steps", [16, 17])],
+    "CLM Existing": [("Account check", [1, 2]), ("Issues", [3, 4]), ("Value & feedback", [5, 6, 7]),
+                     ("Next step", [8])],
+}
+SHORT_LABELS = {
+    # New Sales
+    "Introduced self, company and reason for the call": "Intro",
+    "Qualified the lead (business type, size, current billing/software, decision maker, budget, timeline)": "Qualified lead",
+    "Found the customer's main pain": "Found pain",
+    "Pitched features relevant to their business": "Relevant pitch",
+    "Gave pricing / plan clearly": "Pricing",
+    "Handled objections (e.g. already using Tally/Excel, price)": "Objections",
+    "Booked a demo/trial or got a clear decision": "Demo / decision",
+    "Agreed a dated next step": "Dated next step",
+    # Mobile App
+    "Asked how they bill or work on the move (field staff, travel, multiple outlets)": "On-the-move need",
+    "Pitched mobile billing, real-time sync and payment reminders": "App features",
+    "Offered a demo or trial": "Demo / trial",
+    "Handled internet / sync / cost objections": "Objections",
+    "Gave pricing clearly": "Pricing",
+    "Closed with a payment link or demo date": "Close",
+    # Renewal
+    "Mentioned the renewal due date": "Due date",
+    "Recapped the value the customer got from BUSY": "Value recap",
+    "Checked for and resolved open complaints": "Complaints",
+    "Made a renewal offer (early-renewal / multi-year)": "Renewal offer",
+    "Handled price objections": "Price objection",
+    "Got a payment commitment with a date": "Payment date",
+    # Upsell
+    "Asked about current usage and limits (users, companies, volume)": "Usage & limits",
+    "Linked the upgrade to a real pain": "Linked to pain",
+    "Compared plans with a clear price difference": "Plan compare",
+    "Explained the payback / value": "Payback",
+    "Closed or booked a follow-up": "Close",
+    # CLM Onboarding (CRM form)
+    "Welcomed the customer and introduced self as their onboarding contact": "Welcome",
+    "Confirmed the software is installed and activated (or helped set it up)": "Installed",
+    "Confirmed the registered mobile number": "Reg. mobile",
+    "Captured a recovery mobile number": "Recovery mobile",
+    "Confirmed the email for recovery": "Recovery email",
+    "Explained On-call support": "On-call",
+    "Explained WhatsApp support": "WhatsApp",
+    "Explained Email support": "Email support",
+    "Shared YouTube & FAQs": "YouTube & FAQs",
+    "Asked whether the business is GST registered": "GST",
+    "Asked the business type": "Business type",
+    "Asked the nature of business / industry": "Nature / industry",
+    "Asked the existing accounting software": "Existing software",
+    "Asked whether they have a CA": "CA",
+    "Asked whether they have an accountant": "Accountant",
+    "Offered company creation, data import or a training session": "Setup / training",
+    "Agreed the next follow-up date and time": "Next follow-up",
+    # CLM Existing
+    "Confirmed account details (version, validity, users)": "Account details",
+    "Checked usage and adoption of features": "Usage",
+    "Asked about problems or open complaints": "Problems",
+    "Resolved or escalated issues with a date": "Resolved / escalated",
+    "Explained an under-used feature that would help": "Feature tip",
+    "Checked satisfaction and risk signals": "Satisfaction",
+    "Asked for a referral or review (if the customer was happy)": "Referral",
+    "Set the next touchpoint": "Next touchpoint",
+}
+
+
+def short_label(item: str) -> str:
+    return SHORT_LABELS.get(item) or (item if len(item) <= 22 else item[:20] + "…")
+
+
+def sections_for(call_type: str) -> list[tuple[str, list[str]]]:
+    """[(section name, [checklist items])] for a call type; one section if none is defined."""
+    items = CHECKLISTS.get(call_type, [])
+    secs = SECTIONS.get(call_type)
+    if not secs:
+        return [("Checklist", items)] if items else []
+    return [(name, [items[i - 1] for i in idx if 0 < i <= len(items)]) for name, idx in secs]
