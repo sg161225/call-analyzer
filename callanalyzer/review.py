@@ -173,28 +173,62 @@ def _provider(settings: dict) -> str:
     return settings["analysis"].get("provider", "groq")
 
 
+def _groq_models(settings: dict) -> list[str]:
+    a = settings["analysis"]
+    chain = [a.get("groq_model", "openai/gpt-oss-120b"), *a.get("groq_fallback_models",
+             ["llama-3.3-70b-versatile", "meta-llama/llama-4-scout-17b-16e-instruct"])]
+    return list(dict.fromkeys(m for m in chain if m))
+
+
 def _groq_chat(system: str, user: str, settings: dict, json_mode: bool) -> str:
+    """Call Groq; if a request is too big for a model or hits its per-minute limit, try the
+    fallback models (each has its own free-tier limits) before giving up."""
     import groq
 
     client = groq.Groq()
-    kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
-    model = settings["analysis"].get("groq_model", "openai/gpt-oss-120b")
-    if model.startswith("openai/gpt-oss"):
-        kwargs["reasoning_effort"] = settings["analysis"].get("effort", "medium")
-    try:
-        resp = client.chat.completions.create(
-            model=model, temperature=0.2, max_completion_tokens=8000,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **kwargs)
-    except groq.RateLimitError as e:
-        raise RuntimeError("Groq free-tier limit reached for now. Wait a minute and retry; if it keeps happening, "
-                           "the daily limit is used up (it resets the next day), or set analysis.groq_model to "
-                           "'openai/gpt-oss-20b' in config/settings.toml.") from e
-    except groq.APIStatusError as e:
-        if e.status_code == 413:
-            raise RuntimeError("This call is too long for the Groq free tier in one request. "
-                               "Try a smaller model with a bigger limit (llama-3.3-70b-versatile).") from e
-        raise
-    return resp.choices[0].message.content or ""
+    problems = []
+    for model in _groq_models(settings):
+        kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
+        if model.startswith("openai/gpt-oss"):
+            kwargs["reasoning_effort"] = settings["analysis"].get("effort", "medium")
+        try:
+            resp = client.chat.completions.create(
+                model=model, temperature=0.2, max_completion_tokens=8000,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **kwargs)
+            return resp.choices[0].message.content or ""
+        except groq.RateLimitError:
+            problems.append(f"{model}: free-tier limit reached")
+        except groq.APIStatusError as e:
+            if e.status_code == 413:
+                problems.append(f"{model}: call too long for its free-tier limit")
+            elif e.status_code in (400, 404) and "model" in str(e).lower():
+                problems.append(f"{model}: model not available")
+            else:
+                raise
+    raise RuntimeError("Groq couldn't take this call on the free tier (" + "; ".join(problems) + "). "
+                       "Wait a minute and retry. If it keeps happening, the daily limit may be used up "
+                       "(it resets the next day), or the call may be too long for the free tier.")
+
+
+def _compact_schema() -> str:
+    """The answer format without descriptions (the instructions already explain the fields)."""
+    def strip(o):
+        if isinstance(o, dict):
+            return {k: strip(v) for k, v in o.items() if k not in ("description", "title", "default")}
+        if isinstance(o, list):
+            return [strip(v) for v in o]
+        return o
+    return json.dumps(strip(CallReview.model_json_schema()), separators=(",", ":"))
+
+
+FIELD_NOTES = """Field notes: call_purpose = short purpose; checklist = every item of the call type's checklist in order;
+outcome 'Payment received' only if payment is confirmed on the call; next_step_date = YYYY-MM-DD or "";
+deal_value_inr = rupee amount quoted/agreed, 0 if none; loss_reason 'None' if not lost; risk_level = risk of losing
+the customer; ratings are Good/Partial/Weak with short 'observed' and 'improvement'; objections = each objection with
+the playbook name, customer_said, executive_response, playbook_followed, recommended_response (playbook line);
+fatal_errors = blunders with category, evidence, time_sec; moments = 5-12 key moments (time_sec, kind, text);
+mood_timeline = 1-4 spans of the customer's mood; executive_lines = line numbers spoken by the executive;
+acpt_improvement = 3-6 coaching points; overall_score 1-10; one_line_summary = one line for a manager."""
 
 
 _ENUM_FALLBACKS = ("Other", "None", "Neutral", "Unclear", "Partial", "No", "Not applicable")
@@ -258,9 +292,8 @@ def _parse_review(raw: str) -> dict:
 
 def _review_groq(system: str, user: str, settings: dict) -> dict:
     """JSON mode + schema in the prompt; small slips repaired, then validated; one corrective retry."""
-    schema = json.dumps(CallReview.model_json_schema())
-    system = (system + "\n\nReply with ONE JSON object only, no prose, matching this JSON Schema exactly "
-              "(all fields required; enums must use the exact listed values):\n" + schema)
+    system = (system + "\n\n" + FIELD_NOTES + "\n\nReply with ONE JSON object only, no prose, matching this JSON "
+              "Schema exactly (all fields required; enums must use the exact listed values):\n" + _compact_schema())
     raw = _groq_chat(system, user, settings, json_mode=True)
     try:
         return _parse_review(raw)
