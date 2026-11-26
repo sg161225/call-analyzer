@@ -5,12 +5,12 @@ import pandas as pd
 import streamlit as st
 
 from views.common import inr, load_flat
-from callanalyzer.calltypes import CALL_TYPES, CHECKLISTS, FUNNEL_STAGES, SALES_TYPES, STAGE_OF_OUTCOME
+from callanalyzer.calltypes import CALL_TYPES, CHECKLISTS, CLM_TYPES, FUNNEL_STAGES, SALES_TYPES, STAGE_OF_OUTCOME
 from callanalyzer.playbook import PLAYBOOKS
 from callanalyzer.review import PARAMETERS
 
 TYPE_COLORS = {"New Sales": "#2a78d6", "Mobile App": "#eb6834", "Renewal": "#1baf7a",
-               "Upsell": "#eda100", "CLM": "#e87ba4"}
+               "Upsell": "#eda100", "CLM Onboarding": "#e87ba4", "CLM Existing": "#008300"}
 BLUE, BLUE_LIGHT, ORANGE = "#2a78d6", "#b7d3f6", "#eb6834"
 RATED = ["business_probing", "need_generation", "pitch", "customer_queries", "objection_handling"]
 
@@ -39,7 +39,7 @@ if view.empty:
     st.warning(f"No {ctype if ctype != 'All' else ''} calls match these filters.")
     st.stop()
 
-is_clm = ctype == "CLM"
+is_clm = ctype in CLM_TYPES
 sales = view[view["Call type"].isin(SALES_TYPES)]
 today = pd.Timestamp(date.today())
 open_fu = view[(~view["Follow-up done"]) & (view["Next step"].str.strip() != "")
@@ -75,9 +75,17 @@ k[1].metric("Average score", f"{view['Score'].mean():.1f} / 10", None if d is No
 if is_clm:
     r = _rate(view)
     d = _delta(_rate)
-    k[2].metric("Resolved / healthy", f"{r:.0%}", None if d is None else f"{d * 100:+.0f} pts", border=True,
-                help="CLM success: issue resolved, or customer ends the call satisfied with no risk signals")
-    k[3].metric("At-risk customers", len(at_risk), border=True, help="Medium or high risk of losing the customer")
+    if ctype == "CLM Onboarding":
+        k[2].metric("Onboarded", f"{r:.0%}", None if d is None else f"{d * 100:+.0f} pts", border=True,
+                    help="Onboarding completed or issue resolved, or a follow-up agreed with a happy customer")
+        cp = view["Checklist %"].mean()
+        k[3].metric("CRM fields covered", "—" if pd.isna(cp) else f"{cp:.0%}", border=True,
+                    help="Average share of the onboarding checklist (recovery details, support awareness, "
+                         "business and accounting details) the executive covered")
+    else:
+        k[2].metric("Resolved / healthy", f"{r:.0%}", None if d is None else f"{d * 100:+.0f} pts", border=True,
+                    help="Success: issue resolved, or customer ends the call satisfied with no risk signals")
+        k[3].metric("At-risk customers", len(at_risk), border=True, help="Medium or high risk of losing the customer")
 else:
     r = _rate(sales)
     d = _delta(lambda x: _rate(x[x["Call type"].isin(SALES_TYPES)]))
@@ -99,7 +107,7 @@ if not is_clm and len(sales):
 left, right = st.columns(2, gap="large")
 with left:
     if is_clm:
-        st.markdown("**How CLM calls ended**")
+        st.markdown(f"**How {ctype} calls ended**")
         oc = view["Outcome"].value_counts().rename_axis("Outcome").reset_index(name="Calls")
         chart = alt.Chart(oc).mark_bar(color=BLUE, cornerRadiusEnd=4).encode(
             y=alt.Y("Outcome:N", sort="-x", title=None), x=alt.X("Calls:Q", title="Calls", axis=alt.Axis(tickMinStep=1)),
@@ -149,7 +157,7 @@ with right:
 st.divider()
 st.subheader("🏆 What wins")
 measure = st.radio("Count as success", ["Strict", "Positive outcome"], horizontal=True, key="ov_measure",
-                   captions=["Payment received (CLM: resolved / healthy)",
+                   captions=["Payment received (CLM: onboarding completed / resolved / healthy)",
                              "Also payment promised, demo booked, follow-up agreed"])
 col = "Success" if measure == "Strict" else "Positive"
 rows = []

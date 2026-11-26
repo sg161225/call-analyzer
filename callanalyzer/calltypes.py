@@ -9,9 +9,14 @@ CALL_TYPES = {
     "Mobile App": {"icon": "📱", "about": "Selling the mobile app to existing desktop customers"},
     "Renewal": {"icon": "🔄", "about": "Yearly licence / TSS renewal"},
     "Upsell": {"icon": "⬆️", "about": "More users, a higher edition or add-ons"},
-    "CLM": {"icon": "🤝", "about": "Customer Life Cycle Management: onboarding, check-ins, complaint "
-                                  "follow-up and reactivating dropped customers"},
+    "CLM Onboarding": {"icon": "👋", "about": "Customer Life Cycle Management, onboarding: welcome and setup call "
+                                            "to a customer who has just bought a licence"},
+    "CLM Existing": {"icon": "🤝", "about": "Customer Life Cycle Management, existing customers: check-ins, complaint "
+                                          "follow-up and reactivating dropped customers"},
 }
+CLM_TYPES = ["CLM Onboarding", "CLM Existing"]
+# Older reviews used a single "CLM" type; they are existing-customer calls.
+LEGACY_TYPES = {"CLM": "CLM Existing"}
 SALES_TYPES = ["New Sales", "Mobile App", "Renewal", "Upsell"]
 
 CHECKLISTS: dict[str, list[str]] = {
@@ -48,7 +53,26 @@ CHECKLISTS: dict[str, list[str]] = {
         "Explained the payback / value",
         "Closed or booked a follow-up",
     ],
-    "CLM": [
+    "CLM Onboarding": [
+        "Welcomed the customer and introduced self as their onboarding contact",
+        "Confirmed the software is installed and activated (or helped set it up)",
+        "Confirmed the registered mobile number",
+        "Captured a recovery mobile number",
+        "Confirmed the email for recovery",
+        "Explained On-call support",
+        "Explained WhatsApp support",
+        "Explained Email support",
+        "Shared YouTube & FAQs",
+        "Asked whether the business is GST registered",
+        "Asked the business type",
+        "Asked the nature of business / industry",
+        "Asked the existing accounting software",
+        "Asked whether they have a CA",
+        "Asked whether they have an accountant",
+        "Offered company creation, data import or a training session",
+        "Agreed the next follow-up date and time",
+    ],
+    "CLM Existing": [
         "Confirmed account details (version, validity, users)",
         "Checked usage and adoption of features",
         "Asked about problems or open complaints",
@@ -62,7 +86,7 @@ CHECKLISTS: dict[str, list[str]] = {
 
 OUTCOMES = [
     "Payment received", "Payment promised", "Demo / trial booked", "Follow-up scheduled",
-    "Issue resolved", "Issue escalated", "Undecided", "Not interested / Lost", "Unclear",
+    "Onboarding completed", "Issue resolved", "Issue escalated", "Undecided", "Not interested / Lost", "Unclear",
 ]
 LOSS_REASONS = [
     "None", "Price / budget", "Using competitor / Tally / Excel", "No need / not using the software",
@@ -74,7 +98,7 @@ RISK_LEVELS = ["None", "Low", "Medium", "High"]
 # Funnel stages (cumulative): each call counts for every stage up to the one its outcome reaches.
 STAGE_OF_OUTCOME = {
     "Not interested / Lost": 1, "Unclear": 1, "Undecided": 2, "Issue escalated": 2,
-    "Follow-up scheduled": 3, "Demo / trial booked": 3, "Issue resolved": 3,
+    "Follow-up scheduled": 3, "Demo / trial booked": 3, "Issue resolved": 3, "Onboarding completed": 3,
     "Payment promised": 4, "Payment received": 5,
     # values used by reviews made before call types existed
     "Converted / Retained": 5,
@@ -85,10 +109,19 @@ OPEN_FOLLOWUP_OUTCOMES = {"Payment promised", "Demo / trial booked", "Follow-up 
                           "Issue escalated", "Undecided"}
 
 
+def canonical_type(call_type: str | None) -> str | None:
+    return LEGACY_TYPES.get(call_type, call_type)
+
+
 def is_success(call_type: str, outcome: str, risk: str = "None") -> bool:
-    """Sales calls succeed only when payment is received; CLM calls when the issue is
-    resolved or the customer ends healthy (no medium/high risk and not lost)."""
-    if call_type == "CLM":
+    """Sales calls succeed only when payment is received. Onboarding calls when onboarding is
+    completed; existing-customer CLM calls when the issue is resolved or the customer ends
+    healthy (no medium/high risk and not lost)."""
+    call_type = canonical_type(call_type)
+    if call_type == "CLM Onboarding":
+        return outcome in ("Onboarding completed", "Issue resolved") or (
+            outcome == "Follow-up scheduled" and risk in ("None", "Low"))
+    if call_type == "CLM Existing":
         return outcome == "Issue resolved" or (
             outcome not in ("Not interested / Lost", "Issue escalated", "Unclear")
             and risk in ("None", "Low"))
@@ -97,7 +130,7 @@ def is_success(call_type: str, outcome: str, risk: str = "None") -> bool:
 
 def is_positive(outcome: str) -> bool:
     """Broader 'went well' signal, useful while there are few paid conversions."""
-    return outcome in ("Payment received", "Payment promised", "Demo / trial booked",
+    return outcome in ("Payment received", "Payment promised", "Demo / trial booked", "Onboarding completed",
                        "Issue resolved", "Converted / Retained", "Follow-up scheduled")
 
 
@@ -112,12 +145,16 @@ def guess_type_from_purpose(purpose: str) -> str:
         return "Mobile App"
     if "new sale" in p or "enquiry" in p or "inquiry" in p or "lead" in p or "prospect" in p or "demo" in p:
         return "New Sales"
-    return "CLM"
+    if "onboard" in p or "welcome" in p or "setup" in p or "set up" in p or "activation" in p:
+        return "CLM Onboarding"
+    return "CLM Existing"
 
 
-def checklist_prompt() -> str:
+def checklist_prompt(only: str | None = None) -> str:
     lines = []
     for t, items in CHECKLISTS.items():
+        if only and t != only:
+            continue
         lines.append(f"{t} ({CALL_TYPES[t]['about']}):")
         lines += [f"  - {i}" for i in items]
     return "\n".join(lines)

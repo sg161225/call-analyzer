@@ -6,8 +6,8 @@ from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
-from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, checklist_prompt
-from .playbook import OTHER, PLAYBOOKS, objection_names, playbook_prompt
+from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, canonical_type, checklist_prompt
+from .playbook import OTHER, PLAYBOOKS, objection_names, playbook_prompt, responses_for
 
 Rating = Literal["Good", "Partial", "Weak", "Not applicable"]
 RATING_SCORE = {"Good": 3, "Partial": 2, "Weak": 1}
@@ -91,9 +91,11 @@ company's caller) and who is the customer from context. Write all output in clea
 Company context:
 {context}
 
-First decide the call type (one of: New Sales, Mobile App, Renewal, Upsell, CLM). If the call
-metadata gives a call type, use it. Then fill in the checklist for THAT type, copying each item
-exactly, marking Yes / No / Not applicable:
+First decide the call type (one of: {types}). 'CLM Onboarding' is a welcome / setup
+call to a customer who has just bought a licence; 'CLM Existing' is any other service call to an existing
+customer (check-in, complaint follow-up, reactivating a dropped customer). If the call metadata gives a
+call type, use it. Then fill in the checklist for THAT type, copying each item exactly, marking
+Yes / No / Not applicable:
 {checklists}
 
 Outcome rules: 'Payment received' only when the customer confirms payment is made during the call;
@@ -175,12 +177,21 @@ def _words(t: str) -> set[str]:
 
 
 def _match_objection(name: str, names: list[str], call_type: str = "New Sales") -> str:
-    """Map the AI's objection label to the playbook name (exact, close spelling or same key words)."""
+    """Map the AI's objection label to the playbook name: exact, close spelling, keyword rules,
+    then shared key words; otherwise 'Other'."""
     import difflib
+    from .playbook import KEYWORDS
+    import re
     if name in names:
         return name
     lower = {n.lower(): n for n in names}
-    close = difflib.get_close_matches(name.lower(), list(lower), n=1, cutoff=0.6)
+    if name.lower() in lower:
+        return lower[name.lower()]
+    text = name.lower().replace("'", "")
+    for words, target in KEYWORDS.get(call_type, []):
+        if target in names and any(re.search(r"\b" + re.escape(k.strip().replace("'", "")) + r"\b", text) for k in words):
+            return target
+    close = difflib.get_close_matches(name.lower(), list(lower), n=1, cutoff=0.75)
     if close:
         return lower[close[0]]
     w = _words(name)
@@ -190,14 +201,7 @@ def _match_objection(name: str, names: list[str], call_type: str = "New Sales") 
         overlap = len(w & nw) / max(1, min(len(w), len(nw)))
         if overlap > score:
             best, score = n, overlap
-    if score >= 0.6:
-        return best
-    from .playbook import KEYWORDS
-    text = f" {name.lower()} "
-    for words, target in KEYWORDS.get(call_type, []):
-        if target in names and any(k in text for k in words):
-            return target
-    return OTHER
+    return best if score >= 0.6 else OTHER
 
 
 def normalize(rv: dict, forced_type: str | None = None) -> dict:
@@ -208,6 +212,7 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
 
     if forced_type in CALL_TYPES:
         rv["call_type"] = forced_type
+    rv["call_type"] = canonical_type(rv.get("call_type"))
     official = CHECKLISTS.get(rv.get("call_type"), [])
     given = {(c.get("item") or "").strip().lower(): c for c in rv.get("checklist") or []}
     fixed = []
@@ -226,7 +231,8 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
         if not names:
             break
         name = _match_objection((o.get("objection") or "").strip(), names, rv.get("call_type"))
-        objs.append({**o, "objection": name,
+        rec = o.get("recommended_response") or " / ".join(responses_for(rv.get("call_type"), name)[:2])
+        objs.append({**o, "objection": name, "recommended_response": rec,
                      "playbook_followed": o.get("playbook_followed") if o.get("playbook_followed") in ("Yes", "Partly", "No") else "No"})
     rv["objections"] = objs
     d = (rv.get("next_step_date") or "").strip()
@@ -241,7 +247,29 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
     return rv
 
 
+def classify_call(transcript: str, settings: dict) -> str | None:
+    """Cheap first step for Auto-detect: decide the call type from the start of the call, so the
+    full review only needs that type's checklist and playbook."""
+    types = "\n".join(f"- {t}: {v['about']}" for t, v in CALL_TYPES.items())
+    system = ("Classify this sales/service phone call of an Indian accounting-software company into exactly one "
+              f"call type:\n{types}\nReply with JSON only: {{\"call_type\": \"<one of the names above>\"}}")
+    try:
+        raw = _groq_chat(system, transcript[:4000], {**settings, "analysis": {**settings["analysis"], "effort": "low"}},
+                         json_mode=True)
+        t = json.loads(raw).get("call_type")
+    except Exception:
+        return None
+    return t if t in CALL_TYPES else None
+
+
 def review_call(transcript: str, meta: dict, settings: dict) -> dict:
+    if meta.get("call_type") not in CALL_TYPES and _provider(settings) == "groq":
+        guessed = classify_call(transcript, settings)
+        if guessed:
+            meta = {**meta, "call_type": guessed}
+            rv = _review_call(transcript, meta, settings)
+            rv["call_type"] = rv.get("call_type") or guessed
+            return normalize(rv)
     return normalize(_review_call(transcript, meta, settings), meta.get("call_type"))
 
 
@@ -251,14 +279,17 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
     hint = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else "not given (decide from the call)"
     user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
             f"campaign={meta.get('campaign') or 'unknown'}, call type={hint}\n\n<transcript>\n{transcript}\n</transcript>")
-    forced = meta.get("call_type")
-    if forced in CALL_TYPES and forced not in PLAYBOOKS:
+    forced = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else None
+    # Send only what this call needs when the type is known (keeps requests inside free-tier limits).
+    if forced and forced not in PLAYBOOKS:
         pb = "no objection playbook applies to this call type; return an empty objections list."
     else:
         pb = ("for calls of the types below, list every objection the customer raised, using the exact "
-              "objection name (or 'Other'), and judge whether the executive used the recommended responses. "
-              "For any other call type return an empty objections list.\n" + playbook_prompt())
-    system = SYSTEM.format(context=context, checklists=checklist_prompt(), playbook=pb)
+              "objection name from THAT type's playbook (or 'Other'), and judge whether the executive used the "
+              "recommended responses. For any other call type return an empty objections list.\n"
+              + playbook_prompt(forced))
+    system = SYSTEM.format(context=context, types=", ".join(CALL_TYPES),
+                           checklists=checklist_prompt(forced), playbook=pb)
     if _provider(settings) == "groq":
         return _review_groq(system, user, settings)
     resp = _client().beta.messages.parse(
@@ -281,8 +312,9 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
 INSIGHTS_SYSTEM = """You are the head of quality for an Indian software company's tele-calling team.
 You get structured reviews of many calls (one JSON object per call, with executive, date, campaign,
 pitch version, call type, checklist, outcome, deal value, ratings and notes). Call types are New Sales,
-Mobile App, Renewal, Upsell and CLM (customer life cycle management). Success means payment received
-for sales types, and an issue resolved / healthy customer for CLM. Compare like with like: always say
+Mobile App, Renewal, Upsell, CLM Onboarding (welcome/setup calls to new customers) and CLM Existing
+(service calls to existing customers). Success means payment received for sales types, onboarding completed
+for CLM Onboarding, and an issue resolved / healthy customer for CLM Existing. Compare like with like: always say
 which call type a finding applies to. Write a concise, practical report for the sales manager in
 Markdown with these sections:
 

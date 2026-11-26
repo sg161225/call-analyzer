@@ -10,7 +10,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from callanalyzer import store  # noqa: E402
-from callanalyzer.calltypes import CALL_TYPES, guess_type_from_purpose, is_positive, is_success  # noqa: E402
+from callanalyzer.calltypes import CALL_TYPES, canonical_type, guess_type_from_purpose, is_positive, is_success  # noqa: E402
 from callanalyzer.filenames import parse_file_name  # noqa: E402
 from callanalyzer.review import PARAMETERS, RATING_SCORE  # noqa: E402
 
@@ -38,7 +38,7 @@ def flatten(df: pd.DataFrame) -> pd.DataFrame:
             "Score": rv.get("overall_score"), "Summary": rv.get("one_line_summary", ""),
             "Minutes": round((r["duration_sec"] or 0) / 60, 1),
         }
-        ctype = _s(r.get("call_type")) or rv.get("call_type") or guess_type_from_purpose(rv.get("call_purpose", ""))
+        ctype = canonical_type(_s(r.get("call_type")) or rv.get("call_type") or guess_type_from_purpose(rv.get("call_purpose", "")))
         checklist = rv.get("checklist") or []
         applicable = [c for c in checklist if c.get("done") in ("Yes", "No")]
         risk = rv.get("risk_level", "None")

@@ -73,6 +73,7 @@ def _engine_for(url: str) -> Engine:
     eng = create_engine(url, pool_pre_ping=True, future=True)
     metadata.create_all(eng)
     _migrate(eng)
+    _rename_legacy_types(eng)
     return eng
 
 
@@ -108,6 +109,12 @@ def _migrate(eng: Engine) -> None:
                     rv = json.loads(rj)
                     ct = rv.get("call_type") or guess_type_from_purpose(rv.get("call_purpose", ""))
                     con.execute(update(calls).where(calls.c.id == cid).values(call_type=ct))
+
+
+def _rename_legacy_types(eng: Engine) -> None:
+    """CLM was split into 'CLM Onboarding' and 'CLM Existing'; earlier CLM calls were existing-customer calls."""
+    with eng.begin() as con:
+        con.execute(update(calls).where(calls.c.call_type == "CLM").values(call_type="CLM Existing"))
 
 
 def _now() -> str:

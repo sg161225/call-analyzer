@@ -29,7 +29,8 @@ def _type_from_campaign(text: str) -> str:
     t = (text or "").lower()
     for words, ctype in ((("renew", "tss"), "Renewal"), (("upsell", "upgrade", "addon", "add-on"), "Upsell"),
                          (("mobile", "app"), "Mobile App"), (("new sale", "newsale", "lead", "enquiry", "inquiry"), "New Sales"),
-                         (("drop", "clm", "onboard", "complaint", "reactiv", "retention"), "CLM")):
+                         (("onboard", "welcome", "setup", "activation", "new licen"), "CLM Onboarding"),
+                         (("drop", "clm", "complaint", "reactiv", "retention", "check-in", "checkin"), "CLM Existing")):
         if any(w in t for w in words):
             return ctype
     return AUTO
