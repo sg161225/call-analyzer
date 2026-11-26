@@ -113,7 +113,15 @@ the customer. Success = payment received for sales types; onboarding completed f
 - **📈 Overview**: switch between call types; KPI cards (conversion, revenue won, pipeline, follow-ups due),
   sales funnel, *why we lose*, *what wins* (success rate when each checklist item was done vs not), checklist
   completion and an executive table.
-- **📋 Call reviews**: the scorecard table with your six columns, search by mobile number, executive comparison,
+- **📋 Call reviews** · tick a call to open it, with three views (Previous / Next to move through calls):
+  - **📊 Visual**: score ring, fatal banner, call timeline (key moments + customer mood), scorecard bars,
+    soft-skill gauges, talk-time split, dead air, checklist sections.
+  - **📄 Detailed**: the six columns with observed / improve, checklist with evidence, objections vs playbook
+    with the line to use, outcome, next step, deal value and risk.
+  - **🎧 Recording**: player with waveform and moment markers; click a moment or a transcript line to play from
+    there; searchable, speaker-labelled transcript with ⛔ / ⚠️ / ❌ lines highlighted; download the MP3 and the
+    transcript.
+- **📋 Call reviews (table)**: the scorecard table with your six columns, search by mobile number, executive comparison,
   pitch over time, and the full review of any call (tick rows to fix details in bulk or delete them).
 - **📖 Playbook**: objection playbooks for New Sales, CLM Onboarding and CLM Existing (objections with recommended responses) and how often
   the team uses each one. Every call of those types is checked against its playbook: which objections came up, whether the
@@ -134,10 +142,17 @@ console.groq.com → Settings → Limits. A normal day of reviewing tens of call
 
 AI insights reports cover up to 20 calls at a time on the free tier. Use the filters to focus a report.
 
+## Recordings
+
+Recordings are kept by default (compressed MP3, about 1 MB per 4-minute call) together with a timed transcript,
+so they can be played on the call page. Turn this off with `keep_recordings = false` under `[storage]` in
+`config/settings.toml`. **Settings** shows how much space recordings use and can delete them while keeping the
+reviews. On the free Neon database (0.5 GB) that is roughly 400 calls; delete older recordings when it fills up.
+
 ## Privacy
 
-Recordings and their text are sent to Groq for processing, then deleted by the app. Transcripts are never
-stored or shown. Only the reviews are saved, in `data/calls.db`, which is never uploaded to GitHub. Keys are
+Recordings and their text are sent to Groq for processing. The app stores the review, and (unless you turn it
+off) the recording and its transcript. Everything is saved, in `data/calls.db`, which is never uploaded to GitHub. Keys are
 stored in a private `.env` file, which is also never uploaded. For fully offline use, choose **Local Whisper**
 for speech-to-text (the review step still uses Groq).
 

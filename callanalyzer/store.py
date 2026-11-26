@@ -12,7 +12,7 @@ from datetime import datetime
 from functools import lru_cache
 
 import pandas as pd
-from sqlalchemy import (Column, Float, Integer, MetaData, Table, Text, create_engine, delete,
+from sqlalchemy import (Column, Float, Integer, LargeBinary, MetaData, Table, Text, create_engine, delete,
                         inspect, insert, select, text, update)
 from sqlalchemy.engine import Engine
 
@@ -35,6 +35,16 @@ calls = Table(
     Column("error", Text),
     Column("review_json", Text),
     Column("followup_done", Integer),
+    Column("transcript_json", Text),   # timed segments [{start, end, text}]
+    Column("audio_stats", Text),       # {"dead_air": {...}} measured from the audio
+)
+recordings = Table(
+    "recordings", metadata,
+    Column("call_id", Integer, primary_key=True),
+    Column("mime", Text, nullable=False),
+    Column("audio", LargeBinary, nullable=False),
+    Column("peaks_json", Text),
+    Column("created_at", Text),
 )
 reports = Table(
     "reports", metadata,
@@ -96,6 +106,10 @@ def _migrate(eng: Engine) -> None:
                     mobile=g["mobile"] or None,
                     executive=(ex or "").strip() or g["executive"] or None,
                     campaign=(camp or "").strip() or g["campaign"] or None))
+    for col in ("transcript_json", "audio_stats"):
+        if col not in cols:
+            with eng.begin() as con:
+                con.execute(text(f"ALTER TABLE calls ADD COLUMN {col} TEXT"))
     if "followup_done" not in cols:
         with eng.begin() as con:
             con.execute(text("ALTER TABLE calls ADD COLUMN followup_done INTEGER"))
@@ -138,6 +152,51 @@ def save_review(call_id: int, review: dict, duration: float) -> None:
             duration_sec=float(duration), call_type=review.get("call_type")))
 
 
+def save_transcript(call_id: int, segments: list, audio_stats: dict) -> None:
+    with engine().begin() as con:
+        con.execute(update(calls).where(calls.c.id == call_id).values(
+            transcript_json=json.dumps(segments, ensure_ascii=False), audio_stats=json.dumps(audio_stats)))
+
+
+def save_recording(call_id: int, audio: bytes, mime: str, peaks: list) -> None:
+    with engine().begin() as con:
+        con.execute(delete(recordings).where(recordings.c.call_id == call_id))
+        con.execute(insert(recordings).values(call_id=call_id, mime=mime, audio=audio,
+                                              peaks_json=json.dumps(peaks), created_at=_now()))
+
+
+def get_recording(call_id: int) -> dict | None:
+    with engine().connect() as con:
+        r = con.execute(select(recordings).where(recordings.c.call_id == int(call_id))).first()
+    if not r:
+        return None
+    m = dict(r._mapping)
+    m["peaks"] = json.loads(m.pop("peaks_json") or "[]")
+    m["audio"] = bytes(m["audio"])
+    return m
+
+
+def recording_ids() -> set[int]:
+    with engine().connect() as con:
+        return {row[0] for row in con.execute(select(recordings.c.call_id))}
+
+
+def recordings_size_mb() -> tuple[int, float]:
+    from sqlalchemy import func
+    with engine().connect() as con:
+        n, size = con.execute(select(func.count(), func.coalesce(func.sum(func.length(recordings.c.audio)), 0))).one()
+    return int(n), round(float(size) / 1e6, 1)
+
+
+def delete_all_recordings() -> None:
+    with engine().begin() as con:
+        con.execute(delete(recordings))
+        con.execute(update(calls).values(transcript_json=None))
+    if not is_online_db():
+        with engine().connect().execution_options(isolation_level="AUTOCOMMIT") as con:
+            con.execute(text("VACUUM"))
+
+
 def save_error(call_id: int, error: str) -> None:
     with engine().begin() as con:
         con.execute(update(calls).where(calls.c.id == call_id).values(status="error", error=error[:2000]))
@@ -159,13 +218,16 @@ def delete_call(call_id: int) -> None:
 def delete_calls(call_ids: list[int]) -> int:
     if not call_ids:
         return 0
+    ids = [int(i) for i in call_ids]
     with engine().begin() as con:
-        return con.execute(delete(calls).where(calls.c.id.in_([int(i) for i in call_ids]))).rowcount
+        con.execute(delete(recordings).where(recordings.c.call_id.in_(ids)))
+        return con.execute(delete(calls).where(calls.c.id.in_(ids))).rowcount
 
 
 def delete_all(include_reports: bool = True) -> None:
     """Remove every stored review (and optionally every AI insights report)."""
     with engine().begin() as con:
+        con.execute(delete(recordings))
         con.execute(delete(calls))
         if include_reports:
             con.execute(delete(reports))
@@ -178,6 +240,8 @@ def load_calls() -> pd.DataFrame:
     with engine().connect() as con:
         df = pd.read_sql_query(select(calls).order_by(calls.c.call_date.desc(), calls.c.id.desc()), con)
     df["review"] = df["review_json"].apply(lambda s: json.loads(s) if isinstance(s, str) and s else None)
+    df["segments"] = df["transcript_json"].apply(lambda s: json.loads(s) if isinstance(s, str) and s else [])
+    df["audio"] = df["audio_stats"].apply(lambda s: json.loads(s) if isinstance(s, str) and s else {})
     return df
 
 

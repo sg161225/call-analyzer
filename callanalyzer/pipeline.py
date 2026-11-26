@@ -1,4 +1,5 @@
-"""Upload -> transcribe (in memory/temp only) -> review -> store."""
+"""Upload -> transcribe -> review -> store (review always; recording + timed transcript when
+'storage.keep_recordings' is on in config/settings.toml)."""
 from __future__ import annotations
 
 import tempfile
@@ -6,9 +7,9 @@ from pathlib import Path
 
 from . import store
 from .filenames import parse_file_name
-from .audio import duration_sec, to_wav16k
-from .review import review_call
-from .transcribe import transcribe
+from .audio import dead_air, duration_sec, peaks, to_mp3, to_wav16k
+from .review import review_call, timed_transcript
+from .transcribe import segments_text, transcribe
 
 
 def guess_meta(file_name: str) -> dict:
@@ -25,11 +26,15 @@ def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = N
             path.write_bytes(data)
             wav = to_wav16k(path, Path(tmp) / "call16k.wav")
             dur = duration_sec(wav)
-            text = transcribe(wav, settings, engine)
-        # The audio and transcript are discarded here; only the review is stored.
-        if len(text.strip()) < 20:
+            segments = transcribe(wav, settings, engine)
+            stats = {"dead_air": dead_air(wav)}
+            keep = settings.get("storage", {}).get("keep_recordings", True)
+            if keep:
+                store.save_recording(call_id, to_mp3(wav, Path(tmp) / "call.mp3"), "audio/mpeg", peaks(wav))
+        if len(segments_text(segments).strip()) < 20:
             raise RuntimeError("Almost no speech was recognised in this recording.")
-        review = review_call(text, meta, settings)
+        store.save_transcript(call_id, segments if keep else [], stats)
+        review = review_call(timed_transcript(segments), {**meta, "duration_sec": round(dur)}, settings)
         store.save_review(call_id, review, dur)
     except Exception as e:  # stored so the dashboard can show what failed
         store.save_error(call_id, f"{type(e).__name__}: {e}")

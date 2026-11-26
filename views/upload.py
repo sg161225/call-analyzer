@@ -10,7 +10,9 @@ from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer.transcribe import ENGINES
 
 st.title("⬆️ Upload calls")
-st.caption("Recordings are processed and then discarded. Only the review is saved, not the audio or the transcript.")
+_keep = load_settings().get("storage", {}).get("keep_recordings", True)
+st.caption("Each recording is stored (compressed) with its timed transcript, so you can play it on the call page."
+           if _keep else "Recordings are processed and then discarded. Only the review is saved.")
 
 settings = load_settings()
 

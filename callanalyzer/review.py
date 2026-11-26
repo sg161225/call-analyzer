@@ -70,6 +70,19 @@ class SoftSkills(BaseModel):
 class FatalError(BaseModel):
     category: str = Field(description="Fatal error category, copied exactly from the list")
     evidence: str = Field(description="Short quote or description of what the executive said or did")
+    time_sec: int = Field(default=0, description="When it happened, in seconds from the start (from the [line | mm:ss] stamps). 0 if unknown")
+
+
+class Moment(BaseModel):
+    time_sec: int = Field(description="Seconds from the start of the call, from the [line | mm:ss] stamps")
+    kind: Literal["Checklist done", "Objection", "Missed", "Fatal", "Outcome", "Positive", "Other"]
+    text: str = Field(description="Very short description, e.g. 'Objection: will pay later', 'Recovery mobile captured'")
+
+
+class MoodSpan(BaseModel):
+    start_sec: int
+    end_sec: int
+    mood: Literal["Positive", "Neutral", "Negative"]
 
 
 class CallReview(BaseModel):
@@ -96,6 +109,10 @@ class CallReview(BaseModel):
     objections: List[ObjectionHandled] = Field(
         description="Every objection the customer raised, checked against the playbook. Empty list if none, or if no playbook applies")
     soft_skills: SoftSkills
+    moments: List[Moment] = Field(default_factory=list, description="5-12 key moments of the call in time order: checklist points done or missed, "
+                                              "objections, fatal errors, the outcome")
+    mood_timeline: List[MoodSpan] = Field(default_factory=list, description="The customer's mood through the call as 1-4 consecutive time spans")
+    executive_lines: List[int] = Field(default_factory=list, description="Line numbers (from [line | mm:ss]) spoken by the executive; all other lines are the customer")
     fatal_errors: List[FatalError] = Field(description="Every fatal error (blunder) the executive committed. Empty list if none")
     acpt_improvement: List[str] = Field(description="Top 3-6 prioritised improvements for the executive, most important first, each actionable")
     overall_score: int = Field(description="Overall call quality from 1 (very poor) to 10 (excellent)")
@@ -119,6 +136,9 @@ Yes / No / Not applicable:
 
 Outcome rules: 'Payment received' only when the customer confirms payment is made during the call;
 a promise to pay is 'Payment promised'. Capture any rupee amount quoted or agreed as deal_value_inr.
+
+The transcript is split into numbered, time-stamped lines: [line | mm:ss] text. Use these numbers and times for
+moments, the customer's mood timeline, fatal error times and which lines the executive spoke.
 
 Then review the call against this scorecard:
 - Business probing: did the executive understand the customer's business (type, size, volume,
@@ -259,9 +279,17 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
     fatal = []
     for f in rv.get("fatal_errors") or []:
         if (f.get("category") or f.get("evidence") or "").strip():
-            fatal.append({"category": match_fatal((f.get("category") or "").strip()), "evidence": f.get("evidence", "")})
+            fatal.append({"category": match_fatal((f.get("category") or "").strip()), "evidence": f.get("evidence", ""),
+                          "time_sec": max(0, int(f.get("time_sec") or 0))})
     rv["fatal_errors"] = fatal
     rv["fatal"] = bool(fatal)
+    rv["moments"] = sorted(({"time_sec": max(0, int(m.get("time_sec") or 0)), "kind": m.get("kind", "Other"),
+                             "text": m.get("text", "")} for m in rv.get("moments") or []), key=lambda m: m["time_sec"])
+    rv["mood_timeline"] = sorted(({"start_sec": max(0, int(m.get("start_sec") or 0)),
+                                   "end_sec": max(0, int(m.get("end_sec") or 0)),
+                                   "mood": m.get("mood", "Neutral")} for m in rv.get("mood_timeline") or []),
+                                 key=lambda m: m["start_sec"])
+    rv["executive_lines"] = sorted({int(i) for i in rv.get("executive_lines") or [] if str(i).lstrip("-").isdigit()})
     d = (rv.get("next_step_date") or "").strip()
     try:
         rv["next_step_date"] = date.fromisoformat(d).isoformat() if d else ""
@@ -289,6 +317,14 @@ def classify_call(transcript: str, settings: dict) -> str | None:
     return t if t in CALL_TYPES else None
 
 
+def timed_transcript(segments: list[dict]) -> str:
+    """Numbered, time-stamped lines for the AI: [line | mm:ss] text."""
+    def mmss(t: float) -> str:
+        t = int(t or 0)
+        return f"{t // 60:02d}:{t % 60:02d}"
+    return "\n".join(f"[{i} | {mmss(s.get('start'))}] {s.get('text', '')}" for i, s in enumerate(segments))
+
+
 def review_call(transcript: str, meta: dict, settings: dict) -> dict:
     if meta.get("call_type") not in CALL_TYPES and _provider(settings) == "groq":
         guessed = classify_call(transcript, settings)
@@ -304,7 +340,9 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
     company = settings["company"]
     context = f"{company['name']}: {company['product']}\n{company['context'].strip()}"
     hint = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else "not given (decide from the call)"
+    dur = int(meta.get("duration_sec") or 0)
     user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
+            f"length={dur // 60}:{dur % 60:02d}, "
             f"campaign={meta.get('campaign') or 'unknown'}, call type={hint}\n\n<transcript>\n{transcript}\n</transcript>")
     forced = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else None
     # Send only what this call needs when the type is known (keeps requests inside free-tier limits).

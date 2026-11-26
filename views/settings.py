@@ -97,6 +97,21 @@ raw = store.load_calls()
 n_calls, n_reports = len(raw), len(store.load_reports())
 st.write(f"Stored now: **{n_calls} call(s)** and **{n_reports} AI insights report(s)**.")
 
+n_rec, mb = store.recordings_size_mb()
+keep = settings.get("storage", {}).get("keep_recordings", True)
+st.write(f"Stored recordings: **{n_rec}** ({mb} MB). Keeping new recordings: **{'on' if keep else 'off'}** "
+         "(change `keep_recordings` in config/settings.toml).")
+if store.is_online_db() and mb > 300:
+    st.warning("Recordings are taking a lot of space in the online database (the free Neon plan has 0.5 GB). "
+               "Consider deleting older recordings below.")
+with st.expander("🎧 Delete stored recordings (keep the reviews)", expanded=False):
+    st.caption("Removes every stored recording and transcript. Reviews, scores and dashboards stay.")
+    sure_rec = st.text_input("Type DELETE to confirm", key="del_rec_confirm")
+    if st.button("Delete recordings", disabled=sure_rec.strip().upper() != "DELETE" or n_rec == 0):
+        store.delete_all_recordings()
+        st.success("Recordings deleted.")
+        st.rerun()
+
 with st.expander("🗑️ Delete all data", expanded=False):
     st.warning("This permanently deletes every call review" + (" and AI insights report" if n_reports else "")
                + ". It can't be undone. Your API keys and settings are kept.")
@@ -107,7 +122,7 @@ with st.expander("🗑️ Delete all data", expanded=False):
         export_frame(flat).to_excel(buf, index=False, sheet_name="Call reviews")
         st.download_button("⬇️ Download a backup first (Excel)", buf.getvalue(), "call_reviews_backup.xlsx")
     also_reports = st.checkbox("Also delete AI insights reports", value=True)
-    sure = st.text_input('Type DELETE to confirm')
+    sure = st.text_input('Type DELETE to confirm', key="del_all_confirm")
     if st.button("Delete all data", type="primary", disabled=sure.strip().upper() != "DELETE" or n_calls + n_reports == 0):
         store.delete_all(include_reports=also_reports)
         st.session_state.clear()

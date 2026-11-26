@@ -4,6 +4,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from views import call_view
 from views.common import BADGE, PARAMETERS, RATED, badge, checklist_summary, export_frame, filters, inr, load_flat
 from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer.quality import SHORT_FATAL, SOFT_SKILLS
@@ -122,87 +123,19 @@ with tab_calls:
                 st.rerun()
         if st.button(f"🗑️ Delete {len(ids)} ticked call(s)", type="secondary"):
             confirm_delete(ids)
-    if len(rows) == 1:
-        r = view.iloc[rows[0]]
-        rv = raw.loc[raw["id"] == r["id"], "review"].iloc[0]
+    # Which call to show in full: the most recently ticked row, or the one reached with Previous / Next.
+    ticked = [int(view.iloc[i]["id"]) for i in rows]
+    newly = [i for i in ticked if i not in st.session_state.get("prev_ticked", [])]
+    st.session_state["prev_ticked"] = ticked
+    if newly:
+        st.session_state["detail_id"] = newly[-1]
+    nav_ids = [int(i) for i in view["id"]]
+    detail_id = st.session_state.get("detail_id")
+    if ticked and detail_id in nav_ids:
+        r = view[view["id"] == detail_id].iloc[0]
+        raw_row = raw[raw["id"] == detail_id].iloc[0]
         st.divider()
-        st.subheader(f"{r['Executive']} · {r['Customer'] or r['File']} · {r['Date']:%d %b %Y}" if pd.notna(r["Date"]) else r["File"])
-        st.caption(f"{rv['call_purpose']} · Outcome: **{rv['outcome']}** ({rv['outcome_note']}) · "
-                   f"Sentiment {rv['customer_sentiment_start']} → {rv['customer_sentiment_end']} · "
-                   f"{r['Minutes']} min · Score {rv['overall_score']}/10"
-                   + (f" · 📱 **{r['Mobile']}**" if r["Mobile"] else "") + f" · File: `{r['File']}`")
-        st.write(rv["one_line_summary"])
-        if r["Fatal"]:
-            lines = "".join(f"<li><b>{SHORT_FATAL.get(e['category'], e['category'])}</b>: “{e.get('evidence', '')}”</li>"
-                            for e in r["Fatal errors"])
-            st.markdown(f"""<div style="border:2px solid #d03b3b;border-radius:10px;padding:10px 16px;margin:6px 0 12px;
-background:rgba(208,59,59,.08)"><b>⛔ FATAL CALL</b>: the executive made a blunder on this call<ul style="margin:6px 0 0">{lines}</ul></div>""",
-                        unsafe_allow_html=True)
-        if r["Assessed"]:
-            ss = rv.get("soft_skills") or {}
-            cols = st.columns(3)
-            for col_, key in zip(cols, ["empathy", "humility", "fluency"]):
-                sk = ss.get(key) or {}
-                with col_.container(border=True):
-                    st.caption(SOFT_SKILLS[key][0])
-                    st.markdown(f"**{badge(sk.get('rating'))}**  \n<span style='opacity:.7;font-size:.88em'>{sk.get('evidence', '')}</span>",
-                                unsafe_allow_html=True)
-        icon = CALL_TYPES.get(r["Call type"], {}).get("icon", "")
-        due = f" · due {r['Next step date']:%d %b}" if pd.notna(r["Next step date"]) else ""
-        def card(col, label: str, value: str, note: str = "") -> None:
-            with col.container(border=True):
-                st.caption(label)
-                st.markdown(f"**{value}**" + (f"  \n<span style='opacity:.7;font-size:.85em'>{note}</span>" if note else ""),
-                            unsafe_allow_html=True)
-
-        cards = st.columns(4)
-        card(cards[0], "Call type", f"{icon} {r['Call type']}")
-        card(cards[1], "Outcome", r["Outcome"],
-             "" if r["Loss reason"] in ("None", "") else f"Loss reason: {r['Loss reason']}")
-        card(cards[2], "Deal value", inr(r["Deal value"]) if r["Deal value"] else "—", r["Deal note"])
-        card(cards[3], "Risk", {"High": "🔴 High", "Medium": "🟠 Medium", "Low": "🟢 Low"}.get(r["Risk"], "None"),
-             r["Risk reason"])
-        if r["Next step"]:
-            st.info(f"**Next step{due}:** {r['Next step']}")
-        if r["Checklist"]:
-            with st.container(border=True):
-                st.markdown(f"**{r['Call type']} checklist** — {checklist_summary(r['Checklist']).split(' · ')[0]}")
-                for c in r["Checklist"]:
-                    mark = {"Yes": "✅", "No": "❌"}.get(c["done"], "➖")
-                    ev = c.get("evidence", "")
-                    st.markdown(f"{mark} {c['item']}" + (f" <span style='opacity:.65;font-size:.88em'>· {ev}</span>" if ev else ""),
-                                unsafe_allow_html=True)
-        if r["Objections"]:
-            with st.container(border=True):
-                pct = r["Playbook %"]
-                st.markdown(f"**🛡️ Objections vs playbook**" + (f" — {pct:.0%} handled the playbook way" if pct is not None else ""))
-                mark = {"Yes": "✅ Followed", "Partly": "🟡 Partly", "No": "❌ Not followed"}
-                for o in r["Objections"]:
-                    st.markdown(f"**{o['objection']}** · {mark.get(o['playbook_followed'], '')}  \n"
-                                f"<span style='opacity:.75'>Customer: “{o.get('customer_said', '')}”  ·  "
-                                f"Executive: “{o.get('executive_response', '')}”</span>", unsafe_allow_html=True)
-                    if o["playbook_followed"] != "Yes" and o.get("recommended_response"):
-                        st.markdown(f"💬 *Should say:* {o['recommended_response']}")
-        for key, label in PARAMETERS.items():
-            with st.container(border=True):
-                a = rv.get(key)
-                if key == "acpt_improvement":
-                    st.markdown(f"**{label}**")
-                    for i, tip in enumerate(a, 1):
-                        st.markdown(f"{i}. {tip}")
-                elif key == "customer_queries":
-                    st.markdown(f"**{label}** — {badge(a['rating'])}")
-                    for q in a["queries"]:
-                        st.markdown(f"- {q}" + (" ❗ *unresolved*" if q in a.get("unresolved", []) else ""))
-                    extra = [u for u in a.get("unresolved", []) if u not in a["queries"]]
-                    for u in extra:
-                        st.markdown(f"- ❗ Unresolved: {u}")
-                else:
-                    st.markdown(f"**{label}** — {badge(a['rating'])}")
-                    if key == "pitch":
-                        st.markdown(f"*Features:* {', '.join(a['features_mentioned']) or 'none'}  \n"
-                                    f"*Offers:* {', '.join(a['offers_made']) or '**none**'}")
-                    st.markdown(f"*Observed:* {a['observed']}  \n*Improve:* {a['improvement']}")
+        call_view.render(r, raw_row["review"], raw_row, nav_ids)
     elif not rows:
         st.caption("Tick a row to see its full review. Tick several to fix their details or delete them together.")
 
