@@ -197,19 +197,78 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool) -> str:
     return resp.choices[0].message.content or ""
 
 
+_ENUM_FALLBACKS = ("Other", "None", "Neutral", "Unclear", "Partial", "No", "Not applicable")
+
+
+def _coerce(value, schema: dict, defs: dict):
+    """Repair small slips in the AI's JSON so one odd value can't fail a whole review:
+    unknown choices -> closest allowed value (or a safe default such as 'Other'), numbers sent as
+    text -> numbers, missing fields -> empty values."""
+    import difflib
+    if "$ref" in schema:
+        schema = defs.get(schema["$ref"].split("/")[-1], {})
+    if "anyOf" in schema:
+        schema = next((x for x in schema["anyOf"] if x.get("type") != "null"), schema["anyOf"][0])
+    if "enum" in schema:
+        allowed = [str(a) for a in schema["enum"]]
+        v = str(value or "").strip()
+        if v in allowed:
+            return v
+        low = {a.lower(): a for a in allowed}
+        if v.lower() in low:
+            return low[v.lower()]
+        close = difflib.get_close_matches(v.lower(), list(low), n=1, cutoff=0.6)
+        if close:
+            return low[close[0]]
+        for fb in _ENUM_FALLBACKS:
+            if fb in allowed:
+                return fb
+        return allowed[0]
+    t = schema.get("type")
+    if t == "object":
+        value = value if isinstance(value, dict) else {}
+        props = schema.get("properties", {})
+        out = dict(value)
+        for name, sub in props.items():
+            if name in value:
+                out[name] = _coerce(value[name], sub, defs)
+            elif name in schema.get("required", []):
+                out[name] = _coerce(None, sub, defs)
+        return out
+    if t == "array":
+        items = value if isinstance(value, list) else ([] if value in (None, "") else [value])
+        return [_coerce(v, schema.get("items", {}), defs) for v in items]
+    if t == "integer":
+        try:
+            return int(float(str(value).strip())) if value not in (None, "") else 0
+        except ValueError:
+            return 0
+    if t == "string":
+        return "" if value is None else value if isinstance(value, str) else str(value)
+    if t == "boolean":
+        return bool(value)
+    return value
+
+
+def _parse_review(raw: str) -> dict:
+    schema = CallReview.model_json_schema()
+    data = _coerce(json.loads(raw), schema, schema.get("$defs", {}))
+    return CallReview.model_validate(data).model_dump()
+
+
 def _review_groq(system: str, user: str, settings: dict) -> dict:
-    """JSON mode + schema in the prompt, validated with Pydantic; one corrective retry."""
+    """JSON mode + schema in the prompt; small slips repaired, then validated; one corrective retry."""
     schema = json.dumps(CallReview.model_json_schema())
     system = (system + "\n\nReply with ONE JSON object only, no prose, matching this JSON Schema exactly "
               "(all fields required; enums must use the exact listed values):\n" + schema)
     raw = _groq_chat(system, user, settings, json_mode=True)
     try:
-        return CallReview.model_validate_json(raw).model_dump()
-    except Exception as err:  # pydantic ValidationError or bad JSON
+        return _parse_review(raw)
+    except Exception as err:  # bad JSON, or a problem the repair step can't fix
         fix = (user + "\n\nYour previous reply did not match the schema. Error:\n" + str(err)[:1500]
                + "\nReturn the corrected JSON object only.")
         raw = _groq_chat(system, fix, settings, json_mode=True)
-        return CallReview.model_validate_json(raw).model_dump()
+        return _parse_review(raw)
 
 
 def _words(t: str) -> set[str]:
