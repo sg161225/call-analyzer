@@ -6,6 +6,7 @@ import streamlit as st
 
 from views.common import inr, load_flat
 from callanalyzer.calltypes import CALL_TYPES, CHECKLISTS, FUNNEL_STAGES, SALES_TYPES, STAGE_OF_OUTCOME
+from callanalyzer.playbook import PLAYBOOKS
 from callanalyzer.review import PARAMETERS
 
 TYPE_COLORS = {"New Sales": "#2a78d6", "Mobile App": "#eb6834", "Renewal": "#1baf7a",
@@ -197,6 +198,72 @@ else:
         st.success(f"Biggest lift: **{t['Behaviour']}**: {t['With']:.0%} success when done vs "
                    f"{t['Without']:.0%} when not ({t['n_with']} vs {t['n_without']} calls).")
     st.caption("Faded bars have fewer than 3 calls on one side, so treat them as early signals, not proof.")
+
+# ---- objection handling vs playbook -----------------------------------------------------
+if ctype in PLAYBOOKS:
+    st.divider()
+    st.subheader("🛡️ Objection handling vs playbook")
+    rows = []
+    for _, r in view.iterrows():
+        for o in r["Objections"]:
+            rows.append({"Objection": o.get("objection"), "Followed": o.get("playbook_followed"),
+                         "Executive": r["Executive"], "Success": bool(r[col]), "id": r["id"]})
+    od = pd.DataFrame(rows)
+    if od.empty:
+        st.caption(f"No objections recorded yet for these {ctype} calls. New uploads are checked against the "
+                   "playbook automatically (see the 📖 Playbook page).")
+    else:
+        pts = od["Followed"].map({"Yes": 1.0, "Partly": 0.5, "No": 0.0})
+        fol, notf = od[od["Followed"] == "Yes"], od[od["Followed"] != "Yes"]
+        m = st.columns(4)
+        m[0].metric("Objections raised", len(od), help=f"In {od['id'].nunique()} of {len(view)} calls", border=True)
+        m[1].metric("Playbook followed", f"{pts.mean():.0%}", border=True,
+                    help="Share of objections answered with a playbook response (partly = half)")
+        m[2].metric("Success when followed", "—" if fol.empty else f"{fol['Success'].mean():.0%}",
+                    help=f"{len(fol)} objections", border=True)
+        m[3].metric("Success when not followed", "—" if notf.empty else f"{notf['Success'].mean():.0%}",
+                    help=f"{len(notf)} objections", border=True)
+
+        st.markdown("**Most common objections and how they were handled**")
+        cnt = od.groupby(["Objection", "Followed"]).size().reset_index(name="Times")
+        cnt["Handled"] = cnt["Followed"].map({"Yes": "Followed", "Partly": "Partly", "No": "Not followed"})
+        order = od["Objection"].value_counts().index.tolist()
+        tot = od["Objection"].value_counts().rename_axis("Objection").reset_index(name="Total")
+        bars = alt.Chart(cnt).mark_bar(stroke="white", strokeWidth=2).encode(
+            y=alt.Y("Objection:N", sort=order, title=None, axis=alt.Axis(labelLimit=320)),
+            x=alt.X("Times:Q", title="Times raised", axis=alt.Axis(tickMinStep=1)),
+            color=alt.Color("Handled:N", scale=alt.Scale(domain=["Followed", "Partly", "Not followed"],
+                                                         range=["#0ca30c", "#fab219", "#d03b3b"]),
+                            legend=alt.Legend(orient="top", title=None)),
+            order=alt.Order("o:Q"), tooltip=["Objection", "Handled", "Times"],
+        ).transform_calculate(o="indexof(['Followed','Partly','Not followed'], datum.Handled)")
+        labels = alt.Chart(tot).mark_text(align="left", dx=4).encode(
+            y=alt.Y("Objection:N", sort=order), x="Total:Q", text="Total:Q", color=alt.value("#52514e"))
+        st.altair_chart((bars + labels).properties(height=34 * len(order) + 40), width="stretch")
+
+        c1, c2 = st.container(), st.container()
+        with c1:
+            st.markdown("**By objection**")
+            g = od.groupby("Objection")
+            tab = pd.DataFrame({
+                "Raised": g.size(),
+                "Followed": (g["Followed"].apply(lambda s: (s == "Yes").mean()) * 100).round(),
+                "Success if followed": g.apply(lambda d: d.loc[d["Followed"] == "Yes", "Success"].mean() * 100, include_groups=False).round(),
+                "Success if not": g.apply(lambda d: d.loc[d["Followed"] != "Yes", "Success"].mean() * 100, include_groups=False).round(),
+            }).sort_values("Raised", ascending=False).reset_index()
+            st.dataframe(tab, hide_index=True, width="stretch", column_config={
+                "Followed": st.column_config.ProgressColumn("Playbook followed", min_value=0, max_value=100, format="%d%%"),
+                "Success if followed": st.column_config.NumberColumn(format="%d%%"),
+                "Success if not": st.column_config.NumberColumn(format="%d%%")})
+        with c2:
+            st.markdown("**By executive**")
+            eg = od.assign(p=pts).groupby("Executive")
+            et = pd.DataFrame({"Objections": eg.size(), "Playbook": (eg["p"].mean() * 100).round()}) \
+                .sort_values("Playbook", ascending=False).reset_index()
+            st.dataframe(et, hide_index=True, width="stretch", column_config={
+                "Playbook": st.column_config.ProgressColumn("Playbook followed", min_value=0, max_value=100, format="%d%%")})
+        st.caption("Open a call on the 📋 Call reviews page to see what the customer said, how the executive "
+                   "answered, and the playbook line they should have used.")
 
 # ---- checklist completion + executive table --------------------------------------------
 left, right = st.columns(2, gap="large")

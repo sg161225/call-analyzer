@@ -31,6 +31,7 @@ pages = [
     st.Page("views/overview.py", title="Overview", icon="📈", default=True),
     st.Page("views/dashboard.py", title="Call reviews", icon="📋"),
     st.Page("views/followups.py", title="Follow-ups", icon="📅"),
+    st.Page("views/playbook.py", title="Playbook", icon="📖"),
     st.Page("views/upload.py", title="Upload calls", icon="⬆️"),
     st.Page("views/insights.py", title="AI insights", icon="💡"),
     st.Page("views/settings.py", title="Settings", icon="⚙️"),

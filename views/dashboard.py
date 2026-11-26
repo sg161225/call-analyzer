@@ -153,6 +153,17 @@ with tab_calls:
                     ev = c.get("evidence", "")
                     st.markdown(f"{mark} {c['item']}" + (f" <span style='opacity:.65;font-size:.88em'>· {ev}</span>" if ev else ""),
                                 unsafe_allow_html=True)
+        if r["Objections"]:
+            with st.container(border=True):
+                pct = r["Playbook %"]
+                st.markdown(f"**🛡️ Objections vs playbook**" + (f" — {pct:.0%} handled the playbook way" if pct is not None else ""))
+                mark = {"Yes": "✅ Followed", "Partly": "🟡 Partly", "No": "❌ Not followed"}
+                for o in r["Objections"]:
+                    st.markdown(f"**{o['objection']}** · {mark.get(o['playbook_followed'], '')}  \n"
+                                f"<span style='opacity:.75'>Customer: “{o.get('customer_said', '')}”  ·  "
+                                f"Executive: “{o.get('executive_response', '')}”</span>", unsafe_allow_html=True)
+                    if o["playbook_followed"] != "Yes" and o.get("recommended_response"):
+                        st.markdown(f"💬 *Should say:* {o['recommended_response']}")
         for key, label in PARAMETERS.items():
             with st.container(border=True):
                 a = rv.get(key)

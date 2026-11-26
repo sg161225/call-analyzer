@@ -52,6 +52,8 @@ def flatten(df: pd.DataFrame) -> pd.DataFrame:
             "Sentiment end": rv.get("customer_sentiment_end", ""),
             "Success": is_success(ctype, row["Outcome"], risk), "Positive": is_positive(row["Outcome"]),
             "Follow-up done": _flag(r.get("followup_done")),
+            "Objections": rv.get("objections") or [],
+            "Playbook %": _playbook_score(rv.get("objections") or []),
         })
         for key in RATED:
             a = rv.get(key, {})
@@ -72,6 +74,20 @@ def flatten(df: pd.DataFrame) -> pd.DataFrame:
     if not out.empty:
         out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
     return out
+
+
+PLAYBOOK_POINTS = {"Yes": 1.0, "Partly": 0.5, "No": 0.0}
+
+
+def _playbook_score(objs: list) -> float | None:
+    """Share of objections handled the playbook way (Partly counts half). None if no objections."""
+    pts = [PLAYBOOK_POINTS[o["playbook_followed"]] for o in objs if o.get("playbook_followed") in PLAYBOOK_POINTS]
+    return sum(pts) / len(pts) if pts else None
+
+
+def objections_summary(objs: list) -> str:
+    mark = {"Yes": "✅", "Partly": "🟡", "No": "❌"}
+    return "; ".join(f"{mark.get(o.get('playbook_followed'), '')} {o.get('objection')}" for o in objs or [])
 
 
 def _flag(v) -> bool:
@@ -141,6 +157,7 @@ def export_frame(flat: pd.DataFrame) -> pd.DataFrame:
             "Next step": flat["Next step"], "Next step date": flat["Next step date"].dt.strftime("%Y-%m-%d").fillna(""),
             "Deal value (₹)": flat["Deal value"], "Loss reason": flat["Loss reason"].replace("None", ""),
             "Risk": flat["Risk"].replace("None", ""), "Checklist": flat["Checklist"].map(checklist_summary),
+            "Objections (playbook)": flat["Objections"].map(objections_summary),
             "Score (1-10)": flat["Score"]}
     for key, label in PARAMETERS.items():
         text = flat[f"{key}__text"]

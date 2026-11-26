@@ -7,6 +7,7 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 
 from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, checklist_prompt
+from .playbook import OTHER, PLAYBOOKS, objection_names, playbook_prompt
 
 Rating = Literal["Good", "Partial", "Weak", "Not applicable"]
 RATING_SCORE = {"Good": 3, "Partial": 2, "Weak": 1}
@@ -45,6 +46,15 @@ class ChecklistItem(BaseModel):
     evidence: str = Field(description="Very short evidence from the call (or why it was missed)")
 
 
+class ObjectionHandled(BaseModel):
+    objection: str = Field(description="Objection name copied exactly from the playbook, or 'Other' if it is not in the playbook")
+    customer_said: str = Field(description="What the customer said, short, in English")
+    executive_response: str = Field(description="How the executive responded, short, in English. 'No response' if ignored")
+    playbook_followed: Literal["Yes", "Partly", "No"] = Field(
+        description="Yes = used a recommended response (or an equally strong one); Partly = weak or incomplete; No = ignored or wrong")
+    recommended_response: str = Field(description="The best playbook response for this moment, in the playbook's Hinglish, adapted to this customer")
+
+
 class CallReview(BaseModel):
     call_type: Literal[tuple(CALL_TYPES)] = Field(description="Which of the five call types this call is")
     customer_name: str = Field(description="Customer / business name if mentioned, else empty")
@@ -66,6 +76,8 @@ class CallReview(BaseModel):
     pitch: Pitch
     customer_queries: Queries
     objection_handling: Assessment
+    objections: List[ObjectionHandled] = Field(
+        description="Every objection the customer raised, checked against the playbook. Empty list if none, or if no playbook applies")
     acpt_improvement: List[str] = Field(description="Top 3-6 prioritised improvements for the executive, most important first, each actionable")
     overall_score: int = Field(description="Overall call quality from 1 (very poor) to 10 (excellent)")
     one_line_summary: str = Field(description="One-line summary of the call for a manager")
@@ -95,7 +107,10 @@ Then review the call against this scorecard:
   this customer's situation? A pitch with no concrete offer or next step is at best Partial.
 - Customer queries: list every question/complaint the customer raised; were they answered?
 - Problem solving (objection handling): did they acknowledge, empathise, resolve or escalate,
-  and commit to a timeline?
+  and commit to a timeline? For call types with a playbook, rate this mainly on how well the
+  executive used the playbook responses below.
+
+Objections: {playbook}
 - ACPT improvement required: the prioritised coaching points for the executive.
 
 Rate each parameter Good / Partial / Weak strictly and consistently, so that ratings are
@@ -154,6 +169,37 @@ def _review_groq(system: str, user: str, settings: dict) -> dict:
         return CallReview.model_validate_json(raw).model_dump()
 
 
+def _words(t: str) -> set[str]:
+    import re
+    return {w for w in re.findall(r"[a-z]+", t.lower().replace("'", "")) if len(w) > 2}
+
+
+def _match_objection(name: str, names: list[str], call_type: str = "New Sales") -> str:
+    """Map the AI's objection label to the playbook name (exact, close spelling or same key words)."""
+    import difflib
+    if name in names:
+        return name
+    lower = {n.lower(): n for n in names}
+    close = difflib.get_close_matches(name.lower(), list(lower), n=1, cutoff=0.6)
+    if close:
+        return lower[close[0]]
+    w = _words(name)
+    best, score = OTHER, 0.0
+    for n in names:
+        nw = _words(n)
+        overlap = len(w & nw) / max(1, min(len(w), len(nw)))
+        if overlap > score:
+            best, score = n, overlap
+    if score >= 0.6:
+        return best
+    from .playbook import KEYWORDS
+    text = f" {name.lower()} "
+    for words, target in KEYWORDS.get(call_type, []):
+        if target in names and any(k in text for k in words):
+            return target
+    return OTHER
+
+
 def normalize(rv: dict, forced_type: str | None = None) -> dict:
     """Make AI output consistent: chosen call type wins, checklist matches the official items
     in order, date and amount are valid."""
@@ -174,6 +220,15 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
         fixed.append({"item": item, "done": (match or {}).get("done", "No"),
                       "evidence": (match or {}).get("evidence", "Not covered in the call")})
     rv["checklist"] = fixed
+    names = objection_names(rv.get("call_type"))
+    objs = []
+    for o in rv.get("objections") or []:
+        if not names:
+            break
+        name = _match_objection((o.get("objection") or "").strip(), names, rv.get("call_type"))
+        objs.append({**o, "objection": name,
+                     "playbook_followed": o.get("playbook_followed") if o.get("playbook_followed") in ("Yes", "Partly", "No") else "No"})
+    rv["objections"] = objs
     d = (rv.get("next_step_date") or "").strip()
     try:
         rv["next_step_date"] = date.fromisoformat(d).isoformat() if d else ""
@@ -196,7 +251,14 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
     hint = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else "not given (decide from the call)"
     user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
             f"campaign={meta.get('campaign') or 'unknown'}, call type={hint}\n\n<transcript>\n{transcript}\n</transcript>")
-    system = SYSTEM.format(context=context, checklists=checklist_prompt())
+    forced = meta.get("call_type")
+    if forced in CALL_TYPES and forced not in PLAYBOOKS:
+        pb = "no objection playbook applies to this call type; return an empty objections list."
+    else:
+        pb = ("for calls of the types below, list every objection the customer raised, using the exact "
+              "objection name (or 'Other'), and judge whether the executive used the recommended responses. "
+              "For any other call type return an empty objections list.\n" + playbook_prompt())
+    system = SYSTEM.format(context=context, checklists=checklist_prompt(), playbook=pb)
     if _provider(settings) == "groq":
         return _review_groq(system, user, settings)
     resp = _client().beta.messages.parse(
@@ -248,6 +310,7 @@ def compact(row: dict) -> dict:
                                    "outcome", "loss_reason", "deal_value_inr", "risk_level", "overall_score",
                                    "customer_sentiment_start", "customer_sentiment_end")}
     out["checklist_missed"] = [c["item"][:60] for c in row.get("checklist") or [] if c.get("done") == "No"][:5]
+    out["objections"] = [f"{o.get('objection')}: playbook {o.get('playbook_followed')}" for o in row.get("objections") or []][:5]
     for k in ("business_probing", "need_generation", "objection_handling"):
         a = row.get(k) or {}
         out[k] = {"rating": a.get("rating"), "observed": cut(a.get("observed"))}
