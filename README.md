@@ -128,6 +128,12 @@ the customer. Success = payment received for sales types; onboarding completed f
   executive used the playbook response (✅ / 🟡 / ❌), and the line they should have used. The Overview shows
   the most common objections, playbook adherence by objection and executive, and success when it was followed.
   Edit the playbook in `callanalyzer/playbook.py`.
+- **❓ Product FAQs** (Mobile App: 132 questions in `config/faqs/Mobile App.csv`, editable in Excel): for each
+  Mobile App call, the FAQs matching what was discussed are sent to the AI, which rates every product answer the
+  executive gave (✅ correct / 🟡 partly / ❌ wrong / ➖ not answered) and shows the official answer. Wrong facts
+  about price, offers or features also count as a fatal error. The Overview shows the most asked questions,
+  answers to fix, and each executive's knowledge score; 📖 Playbook → ❓ FAQs is a searchable reference. Add a
+  `<call type>.csv` file (No, Question, Answer) to give another call type its own FAQs.
 - **📅 Follow-ups**: payment promises, demos and callbacks by due date (tick *Done* when completed), plus
   **at-risk customers** to call before their renewal.
 - **💡 AI insights**: a written report on what's working, what isn't and how to improve, by call type.

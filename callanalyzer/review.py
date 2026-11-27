@@ -7,6 +7,7 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 
 from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, canonical_type, checklist_prompt
+from .faq import ACCURACY, NOT_IN_FAQ, faq_prompt, faqs_for, match_faq, relevant_faqs
 from .quality import match_fatal, quality_prompt
 from .playbook import OTHER, PLAYBOOKS, objection_names, playbook_prompt, responses_for
 
@@ -85,6 +86,15 @@ class MoodSpan(BaseModel):
     mood: Literal["Positive", "Neutral", "Negative"]
 
 
+class FaqAnswer(BaseModel):
+    customer_question: str = Field(description="The product question the customer asked, short, in English")
+    faq_no: int = Field(default=0, description="Number of the matching FAQ, 0 if none of the given FAQs covers it")
+    executive_answer: str = Field(description="What the executive answered, short. 'No answer' if none")
+    accuracy: Literal[tuple(ACCURACY)] = Field(
+        description="Correct = matches the FAQ; Partly correct = incomplete or vague; Wrong = contradicts the FAQ; "
+                    "Not answered = no real answer")
+
+
 class CallReview(BaseModel):
     call_type: Literal[tuple(CALL_TYPES)] = Field(description="Which of the five call types this call is")
     customer_name: str = Field(description="Customer / business name if mentioned, else empty")
@@ -106,6 +116,8 @@ class CallReview(BaseModel):
     pitch: Pitch
     customer_queries: Queries
     objection_handling: Assessment
+    faq_answers: List[FaqAnswer] = Field(default_factory=list, description="Each product question the customer asked, "
+                                         "checked against the company's FAQ answers. Empty if no FAQs were given")
     objections: List[ObjectionHandled] = Field(
         description="Every objection the customer raised, checked against the playbook. Empty list if none, or if no playbook applies")
     soft_skills: SoftSkills
@@ -152,6 +164,8 @@ Then review the call against this scorecard:
   executive used the playbook responses below.
 
 Objections: {playbook}
+
+Product questions: {faq}
 - ACPT improvement required: the prioritised coaching points for the executive.
 
 {quality}
@@ -228,7 +242,8 @@ the customer; ratings are Good/Partial/Weak with short 'observed' and 'improveme
 the playbook name, customer_said, executive_response, playbook_followed, recommended_response (playbook line);
 fatal_errors = blunders with category, evidence, time_sec; moments = 5-12 key moments (time_sec, kind, text);
 mood_timeline = 1-4 spans of the customer's mood; executive_lines = line numbers spoken by the executive;
-acpt_improvement = 3-6 coaching points; overall_score 1-10; one_line_summary = one line for a manager."""
+acpt_improvement = 3-6 coaching points; overall_score 1-10; one_line_summary = one line for a manager; faq_answers = each product question with faq_no, executive_answer,
+accuracy (Correct / Partly correct / Wrong / Not answered)."""
 
 
 _ENUM_FALLBACKS = ("Other", "None", "Neutral", "Unclear", "Partial", "No", "Not applicable")
@@ -368,6 +383,21 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
         objs.append({**o, "objection": name, "recommended_response": rec,
                      "playbook_followed": o.get("playbook_followed") if o.get("playbook_followed") in ("Yes", "Partly", "No") else "No"})
     rv["objections"] = objs
+    answers = []
+    for a in (rv.get("faq_answers") or []) if faqs_for(rv.get("call_type")) else []:
+        if not (a.get("customer_question") or "").strip():
+            continue
+        hit = None
+        no = int(a.get("faq_no") or 0)
+        if no:
+            hit = next((f for f in faqs_for(rv.get("call_type")) if f["no"] == no), None)
+        if hit is None:
+            hit = match_faq(rv.get("call_type"), a.get("customer_question", ""))
+        answers.append({"customer_question": a["customer_question"], "executive_answer": a.get("executive_answer", ""),
+                        "accuracy": a.get("accuracy") if a.get("accuracy") in ACCURACY else "Not answered",
+                        "faq_no": hit["no"] if hit else 0, "faq_question": hit["q"] if hit else NOT_IN_FAQ,
+                        "faq_answer": hit["a"] if hit else ""})
+    rv["faq_answers"] = answers
     fatal = []
     for f in rv.get("fatal_errors") or []:
         if (f.get("category") or f.get("evidence") or "").strip():
@@ -445,8 +475,17 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
               "objection name from THAT type's playbook (or 'Other'), and judge whether the executive used the "
               "recommended responses. For any other call type return an empty objections list.\n"
               + playbook_prompt(forced))
+    faqs = relevant_faqs(forced, transcript) if forced else []
+    if faqs:
+        faq = ("below are the company's official answers to product questions likely raised in this call. For EVERY "
+               "product question the customer asked, give faq_no (0 if none of these covers it), the executive's answer "
+               "and its accuracy against the official answer. A Wrong answer about price, offers, policy or a feature "
+               "that doesn't exist is also a fatal error 'False information or a promise they can't make'.\n"
+               + faq_prompt(faqs))
+    else:
+        faq = "no FAQ list applies to this call; return an empty faq_answers list."
     system = SYSTEM.format(context=context, types=", ".join(CALL_TYPES), quality=quality_prompt(),
-                           checklists=checklist_prompt(forced), playbook=pb)
+                           checklists=checklist_prompt(forced), playbook=pb, faq=faq)
     if _provider(settings) == "groq":
         return _review_groq(system, user, settings)
     resp = _client().beta.messages.parse(
@@ -502,6 +541,8 @@ def compact(row: dict) -> dict:
                                    "customer_sentiment_start", "customer_sentiment_end")}
     out["checklist_missed"] = [c["item"][:60] for c in row.get("checklist") or [] if c.get("done") == "No"][:5]
     out["objections"] = [f"{o.get('objection')}: playbook {o.get('playbook_followed')}" for o in row.get("objections") or []][:5]
+    out["product_questions"] = [f"{a.get('faq_question') or a.get('customer_question')}: {a.get('accuracy')}"
+                                for a in row.get("faq_answers") or []][:5]
     ss = row.get("soft_skills") or {}
     out["soft_skills"] = {k: (ss.get(k) or {}).get("rating") for k in ("empathy", "humility", "fluency")}
     out["fatal_errors"] = [f.get("category") for f in row.get("fatal_errors") or []]

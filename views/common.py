@@ -53,6 +53,8 @@ def flatten(df: pd.DataFrame) -> pd.DataFrame:
             "Success": is_success(ctype, row["Outcome"], risk), "Positive": is_positive(row["Outcome"]),
             "Follow-up done": _flag(r.get("followup_done")),
             "Objections": rv.get("objections") or [],
+            "FAQ answers": rv.get("faq_answers") or [],
+            "FAQ %": _faq_score(rv.get("faq_answers") or []),
             # Soft skills / fatal: None when the call was reviewed before these checks existed.
             "Assessed": "soft_skills" in rv,
             "Fatal": bool(rv.get("fatal_errors")) if "soft_skills" in rv else None,
@@ -90,6 +92,19 @@ def _playbook_score(objs: list) -> float | None:
     """Share of objections handled the playbook way (Partly counts half). None if no objections."""
     pts = [PLAYBOOK_POINTS[o["playbook_followed"]] for o in objs if o.get("playbook_followed") in PLAYBOOK_POINTS]
     return sum(pts) / len(pts) if pts else None
+
+
+FAQ_POINTS = {"Correct": 1.0, "Partly correct": 0.5, "Wrong": 0.0, "Not answered": 0.0}
+
+
+def _faq_score(answers: list) -> float | None:
+    pts = [FAQ_POINTS[a["accuracy"]] for a in answers if a.get("accuracy") in FAQ_POINTS]
+    return sum(pts) / len(pts) if pts else None
+
+
+def faq_summary(answers: list) -> str:
+    mark = {"Correct": "✅", "Partly correct": "🟡", "Wrong": "❌", "Not answered": "➖"}
+    return "; ".join(f"{mark.get(a.get('accuracy'), '')} {a.get('customer_question')}" for a in answers or [])
 
 
 def fatal_summary(errs: list) -> str:
@@ -170,6 +185,7 @@ def export_frame(flat: pd.DataFrame) -> pd.DataFrame:
             "Deal value (₹)": flat["Deal value"], "Loss reason": flat["Loss reason"].replace("None", ""),
             "Risk": flat["Risk"].replace("None", ""), "Checklist": flat["Checklist"].map(checklist_summary),
             "Objections (playbook)": flat["Objections"].map(objections_summary),
+            "Product questions (FAQ)": flat["FAQ answers"].map(faq_summary),
             "FATAL": flat["Fatal"].map({True: "FATAL", False: "", None: ""}),
             "Fatal errors": flat["Fatal errors"].map(fatal_summary),
             "Empathy": flat["Empathy"].fillna(""), "Humility & courtesy": flat["Humility"].fillna(""),

@@ -221,6 +221,12 @@ def _visual(r, rv, segments, stats):
             msg = (f"Dead air: **{da['count']}** pause(s) of {da.get('min_len', 4):.0f}s or more"
                    + (f" ({da['total_sec']:.0f}s total, longest {da['longest_sec']:.0f}s)" if da["count"] else " 🎉"))
             st.markdown(msg)
+        fa = r["FAQ answers"]
+        if fa:
+            ok = sum(a["accuracy"] == "Correct" for a in fa)
+            wrong = sum(a["accuracy"] == "Wrong" for a in fa)
+            st.markdown(f"Product questions: **{ok} of {len(fa)}** answered correctly"
+                        + (f" · <span style='color:{BAD}'>❌ {wrong} wrong</span>" if wrong else ""), unsafe_allow_html=True)
         moods = rv.get("mood_timeline") or []
         if moods:
             st.markdown("Customer mood: " + " → ".join(chip(m["mood"], MOOD_COLOR.get(m["mood"], NA)) for m in moods),
@@ -300,6 +306,18 @@ def _detailed(r, rv):
                                 unsafe_allow_html=True)
                     if o["playbook_followed"] != "Yes" and o.get("recommended_response"):
                         st.markdown(f"💬 *Should say:* {o['recommended_response']}")
+        if r["FAQ answers"]:
+            with st.container(border=True):
+                pct = r["FAQ %"]
+                st.markdown("**❓ Product questions vs FAQ**" + (f" · {pct:.0%} answered correctly" if pct is not None else ""))
+                mark = {"Correct": "✅ Correct", "Partly correct": "🟡 Partly correct", "Wrong": "❌ Wrong",
+                        "Not answered": "➖ Not answered"}
+                for a in r["FAQ answers"]:
+                    st.markdown(f"**{esc(a['customer_question'])}** · {mark.get(a['accuracy'], '')}  \n"
+                                f"<span style='opacity:.75'>Executive said: “{esc(a.get('executive_answer'))}”</span>",
+                                unsafe_allow_html=True)
+                    if a.get("faq_no") and a["accuracy"] != "Correct":
+                        st.markdown(f"📘 *FAQ {a['faq_no']}: {a['faq_question']}*  \n{a['faq_answer']}")
         ss = rv.get("soft_skills") or {}
         if ss:
             with st.container(border=True):

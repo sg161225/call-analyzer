@@ -4,7 +4,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from views import achieve, quality_view
+from views import achieve, faq_view, quality_view
+from callanalyzer.faq import has_faqs
 from views.common import inr, load_flat
 from callanalyzer.calltypes import CALL_TYPES, CHECKLISTS, CLM_TYPES, FUNNEL_STAGES, SALES_TYPES, STAGE_OF_OUTCOME
 from callanalyzer.playbook import PLAYBOOKS
@@ -229,6 +230,11 @@ else:
         st.success(f"Biggest lift: **{t['Behaviour']}**: {t['With']:.0%} success when done vs "
                    f"{t['Without']:.0%} when not ({t['n_with']} vs {t['n_without']} calls).")
     st.caption("Faded bars have fewer than 3 calls on one side, so treat them as early signals, not proof.")
+
+# ---- product knowledge vs FAQ ----------------------------------------------------------
+if has_faqs(ctype):
+    st.divider()
+    faq_view.render(view, ctype)
 
 # ---- objection handling vs playbook -----------------------------------------------------
 if ctype in PLAYBOOKS:
