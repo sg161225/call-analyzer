@@ -8,7 +8,7 @@ from pathlib import Path
 from . import store
 from .filenames import parse_file_name
 from .audio import dead_air, duration_sec, peaks, to_mp3, to_wav16k
-from .review import review_call, timed_transcript
+from .review import detect_speakers, review_call, timed_transcript
 from .transcribe import segments_text, transcribe
 
 
@@ -35,11 +35,30 @@ def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = N
             raise RuntimeError("Almost no speech was recognised in this recording.")
         store.save_transcript(call_id, segments if keep else [], stats, dur)
         review = review_call(timed_transcript(segments), {**meta, "duration_sec": round(dur)}, settings)
+        _speakers(review, segments, settings)
         store.save_review(call_id, review, dur)
     except Exception as e:  # stored so the dashboard can show what failed
         store.save_error(call_id, f"{type(e).__name__}: {e}")
         raise
     return call_id
+
+
+def _speakers(review: dict, segments: list[dict], settings: dict) -> None:
+    """Replace the review's rough speaker labels with a focused second pass (kept as-is if that fails)."""
+    ex = detect_speakers(segments, settings)
+    if ex is not None:
+        review["executive_lines"] = ex
+        review["speakers_source"] = "ai"
+
+
+def recheck_speakers(call_id: int, settings: dict) -> bool:
+    df = store.load_calls()
+    row = df[df["id"] == call_id].iloc[0]
+    ex = detect_speakers(row["segments"], settings)
+    if ex is None:
+        return False
+    store.update_review(call_id, executive_lines=ex, speakers_source="ai")
+    return True
 
 
 def can_retry(raw_row) -> bool:
@@ -63,6 +82,7 @@ def retry_review(call_id: int, settings: dict) -> None:
             "duration_sec": round(dur)}
     try:
         review = review_call(timed_transcript(segments), meta, settings)
+        _speakers(review, segments, settings)
     except Exception as e:
         store.save_error(call_id, f"{type(e).__name__}: {e}")
         raise

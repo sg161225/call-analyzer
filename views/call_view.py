@@ -479,6 +479,44 @@ def _line_flags(rv, segments):
     return flags
 
 
+def _fix_speakers(r, rv, segments):
+    """Let the reviewer correct speaker labels, or ask the AI to check them again."""
+    cid = int(r["id"])
+    b1, b2, _ = st.columns([1, 1.4, 1.6])
+    editing = b1.toggle("✏️ Fix speakers", key=f"fixsp_{cid}")
+    if b2.button("🤖 Re-check speakers with AI", key=f"aisp_{cid}", width="stretch",
+                 help="Runs a separate AI check that only works out who said each line."):
+        from callanalyzer.config import load_settings
+        from callanalyzer.pipeline import recheck_speakers
+        with st.spinner("Checking who said each line…"):
+            ok = recheck_speakers(cid, load_settings())
+        if ok:
+            st.session_state["sp_msg"] = "✅ Speakers checked again by the AI."
+            st.rerun()
+        st.warning("The AI couldn't check the speakers right now (free-tier limit or no Groq key). Try again in a "
+                   "minute, or fix them by hand.")
+    if msg := st.session_state.pop("sp_msg", None):
+        st.success(msg)
+    if not editing:
+        return
+    ex = set(rv.get("executive_lines") or [])
+    ed = st.data_editor(pd.DataFrame({
+        "Time": [mmss(s_["start"]) for s_ in segments],
+        "Speaker": ["Executive" if i in ex else "Customer" for i in range(len(segments))],
+        "Text": [s_["text"] for s_ in segments]}),
+        hide_index=True, width="stretch", height=380, key=f"sped_{cid}", disabled=["Time", "Text"],
+        column_config={"Speaker": st.column_config.SelectboxColumn(options=["Executive", "Customer"], required=True, width="small"),
+                       "Time": st.column_config.TextColumn(width="small"),
+                       "Text": st.column_config.TextColumn(width="large")})
+    def save(lines: list[int]) -> None:
+        store.update_review(cid, executive_lines=lines, speakers_source="manual")
+        st.session_state[f"fixsp_{cid}"] = False
+        st.session_state["sp_msg"] = "✅ Speaker labels saved."
+
+    st.button("💾 Save speakers", type="primary", key=f"spsave_{cid}", on_click=save,
+              args=([i for i, w in enumerate(ed["Speaker"]) if w == "Executive"],))
+
+
 def _recording(r, rv, segments, stats):
     rec = store.get_recording(int(r["id"]))
     length = int(r["Minutes"] * 60) or (int(segments[-1]["end"]) if segments else 0)
@@ -543,8 +581,10 @@ def _recording(r, rv, segments, stats):
             if t != seek:
                 st.session_state.update(cv_seek=t, cv_autoplay=True)
                 st.rerun()
-        st.caption("⛔ fatal · ⚠️ objection · ❌ missed point. Speaker labels are worked out by the AI and can be "
-                   "wrong when two people talk in one line.")
+        st.caption("⛔ fatal · ⚠️ objection · ❌ missed point. Speaker labels are worked out by the AI"
+                   + (" and were corrected by hand." if rv.get("speakers_source") == "manual" else
+                      "; if a line is wrong, fix it with ✏️ Fix speakers below."))
+        _fix_speakers(r, rv, segments)
     with st.expander("📜 Read the full transcript"):
         tint = {"⛔": BAD, "⚠️": WARN, "❌": BAD}
         lines = []

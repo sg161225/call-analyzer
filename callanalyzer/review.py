@@ -535,6 +535,43 @@ def timed_transcript(segments: list[dict]) -> str:
     return "\n".join(f"[{i} | {mmss(s.get('start'))}] {s.get('text', '')}" for i, s in enumerate(segments))
 
 
+SPEAKER_SYSTEM = """You label who speaks each line of a phone call between an EXECUTIVE of {company} (a software
+company's tele-caller) and a CUSTOMER (a business owner or their staff). The transcript is machine-made, translated to
+English and split into short numbered lines, so one sentence can run over several lines and the speaker changes often.
+
+How to tell them apart:
+- EXECUTIVE: greets and introduces the company, says who they are calling for, explains features, offers, prices,
+  process or steps, asks about the customer's business, handles objections, promises callbacks or support.
+- CUSTOMER: answers the executive's questions, talks about their own business, problems and usage, raises
+  objections or refusals ("I don't need it", "I don't want an update", "not now", "call later"), asks questions about
+  price or features, asks the executive to wait ("one minute").
+- Both say "sir"/"ji". Follow the turn-taking: an answer usually comes from the other person than the question.
+  A line that continues an unfinished sentence belongs to the same speaker. For garbled or repeated noise lines
+  (e.g. the same short phrase repeated during silence), use the surrounding context.
+
+Return ONLY JSON: {{"labels": "0:E 1:C 2:C ..."}} with every line number exactly once, E = executive, C = customer."""
+
+
+def detect_speakers(segments: list[dict], settings: dict) -> list[int] | None:
+    """A separate, focused AI pass that works out who spoke each line. Returns the executive's line numbers,
+    or None if it couldn't be done (the review's own labels are then kept)."""
+    import re
+    if not segments or _provider(settings) != "groq":
+        return None
+    lines = "\n".join(f"{i}: {' '.join(str(s.get('text', '')).split())}" for i, s in enumerate(segments))
+    system = SPEAKER_SYSTEM.format(company=settings["company"]["name"])
+    try:
+        out = _groq_chat(system, lines, settings, json_mode=True, max_out=max(1500, 12 * len(segments)),
+                         what="work out the speakers")
+        labels = json.loads(out).get("labels", "")
+    except Exception:  # noqa: BLE001 - best effort; keep the review's labels
+        return None
+    found = {int(n): who.upper() for n, who in re.findall(r"(\d+)\s*[:=]\s*([ECec])", str(labels))}
+    if len(found) < 0.8 * len(segments):
+        return None
+    return sorted(i for i, w in found.items() if w == "E" and i < len(segments))
+
+
 def review_call(transcript: str, meta: dict, settings: dict) -> dict:
     if meta.get("call_type") not in CALL_TYPES and _provider(settings) == "groq":
         guessed = classify_call(transcript, settings)

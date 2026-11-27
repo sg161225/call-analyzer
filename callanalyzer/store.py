@@ -152,6 +152,15 @@ def add_call(meta: dict) -> int:
         return int(res.inserted_primary_key[0])
 
 
+def update_review(call_id: int, **fields) -> None:
+    """Change a few fields of a saved review (e.g. corrected speaker labels)."""
+    with engine().begin() as con:
+        rj = con.execute(select(calls.c.review_json).where(calls.c.id == call_id)).scalar()
+        rv = json.loads(rj) if rj else {}
+        rv.update(fields)
+        con.execute(update(calls).where(calls.c.id == call_id).values(review_json=json.dumps(rv, ensure_ascii=False)))
+
+
 def save_review(call_id: int, review: dict, duration: float) -> None:
     with engine().begin() as con:
         con.execute(update(calls).where(calls.c.id == call_id).values(
