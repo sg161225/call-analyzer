@@ -1,11 +1,27 @@
-from datetime import datetime
-
 import streamlit as st
 
 from views.common import filters, load_flat
 from callanalyzer import store
 from callanalyzer.config import load_settings, missing_keys
 from callanalyzer.review import insights_report
+
+
+def downloads(r: dict, key: str) -> None:
+    """PDF (for sharing) and Markdown downloads for one saved report."""
+    when = str(r["created_at"]).replace("T", " ")[:16]
+    stamp = str(r["created_at"])[:10].replace("-", "")
+    c1, c2, _ = st.columns([1.3, 1.3, 3])
+    try:
+        from callanalyzer.pdf import report_pdf
+        company = load_settings()["company"]["name"]
+        pdf = report_pdf(r["content_md"], f"{company} · Call insights report",
+                         f"Generated {when}  ·  {r['scope']}", f"{company} call insights · {when}")
+        c1.download_button("📄 Download PDF", pdf, f"call_insights_{stamp}.pdf", "application/pdf",
+                           key=f"pdf_{key}", type="primary", width="stretch")
+    except Exception as e:  # never block the page if the PDF can't be made
+        c1.caption(f"PDF not available: {type(e).__name__}: {e}")
+    c2.download_button("⬇️ Markdown (.md)", r["content_md"].encode(), f"call_insights_{stamp}.md",
+                       key=f"md_{key}", width="stretch")
 
 st.title("💡 AI insights")
 st.caption("The AI reads all the call reviews in the selection and writes a report: what's working, what isn't, "
@@ -47,9 +63,10 @@ if reports:
     st.divider()
     st.subheader(f"Latest report · {latest['created_at'].replace('T', ' ')}")
     st.caption(latest["scope"])
+    downloads(latest, "latest")
     st.markdown(latest["content_md"])
-    st.download_button("⬇️ Download report (.md)", latest["content_md"].encode(),
-                       f"call_insights_{datetime.now():%Y%m%d}.md")
+    downloads(latest, "latest_end")
     for r in older:
         with st.expander(f"{r['created_at'].replace('T', ' ')} · {r['scope']}"):
+            downloads(r, str(r.get("id", r["created_at"])))
             st.markdown(r["content_md"])
