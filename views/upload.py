@@ -5,6 +5,7 @@ import streamlit as st
 
 from views.common import load_flat  # noqa: F401  (sets import path)
 from callanalyzer.config import load_settings, missing_keys
+from callanalyzer.review import DailyLimit
 from callanalyzer.pipeline import guess_meta, process_call
 from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer.transcribe import ENGINES
@@ -74,10 +75,11 @@ if engine == "local":
     st.caption("Local Whisper is free but slow: expect a few minutes per call. The model downloads on first use.")
 
 if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(missing) or bool(blank)):
-    ok = 0
+    ok, limit_hit, waiting = 0, None, 0
     progress = st.progress(0.0)
     for i, (f, m) in enumerate(zip(files, meta.to_dict("records"))):
-        with st.status(f"{f.name}: transcribing and reviewing…", expanded=False) as s:
+        label = "transcribing (AI review later: daily limit reached)" if limit_hit else "transcribing and reviewing"
+        with st.status(f"{f.name}: {label}…", expanded=False) as s:
             try:
                 d = m["Call date"]
                 process_call(f.getvalue(), {
@@ -86,12 +88,25 @@ if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(miss
                     "call_date": d.isoformat() if hasattr(d, "isoformat") and not pd.isna(d) else _t(d),
                     "campaign": _t(m["Campaign"]), "pitch_version": _t(m["Pitch version"]),
                     "call_type": None if m.get("Call type") in (None, AUTO) else m["Call type"],
-                }, settings, engine)
-                s.update(label=f"{f.name}: done ✅", state="complete")
-                ok += 1
+                }, settings, engine, review=not limit_hit)
+                if limit_hit:
+                    waiting += 1
+                    s.update(label=f"{f.name}: transcribed, waiting for review ⏳", state="complete")
+                else:
+                    s.update(label=f"{f.name}: done ✅", state="complete")
+                    ok += 1
+            except DailyLimit as e:
+                limit_hit = getattr(e, "wait", "") or "later"
+                waiting += 1
+                s.update(label=f"{f.name}: transcribed, waiting for review ⏳ (daily AI limit reached)", state="error")
+                st.write(str(e).split(" Details:")[0])
             except Exception as e:
                 s.update(label=f"{f.name}: failed ❌", state="error")
                 st.write(f"{type(e).__name__}: {e}")
         progress.progress((i + 1) / len(files))
     st.success(f"{ok} of {len(files)} call(s) reviewed.")
+    if limit_hit:
+        st.warning(f"⏳ {waiting} call(s) were transcribed and saved but not reviewed, because the free AI's daily "
+                   f"limit is used up. It frees up again in about **{limit_hit}**. Then open **Call reviews** "
+                   "and click **🔁 Retry all**. No need to upload them again.")
     st.page_link("views/overview.py", label="Open the overview →", icon="📈")

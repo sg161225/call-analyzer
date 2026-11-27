@@ -10,6 +10,7 @@ from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer.quality import SHORT_FATAL, SOFT_SKILLS
 from callanalyzer import store
 from callanalyzer.config import load_settings
+from callanalyzer.review import DailyLimit
 from callanalyzer.pipeline import can_retry, retry_review
 
 # Status colours (good / warning / critical), always shown with a label.
@@ -50,6 +51,9 @@ if not failed.empty:
                     try:
                         retry_review(cid, load_settings())
                         ok += 1
+                    except DailyLimit as e:      # no point trying the rest today
+                        errs.insert(0, str(e).split(" The transcript")[0])
+                        break
                     except Exception as e:  # noqa: BLE001 - shown to the user
                         errs.append(str(e)[:200])
             st.session_state["retry_msg"] = (not errs, f"{ok} of {len(ids)} call(s) reviewed."

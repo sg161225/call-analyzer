@@ -220,6 +220,27 @@ def _groq_models(settings: dict, client=None) -> list[str]:
     return chain[:MAX_MODELS]
 
 
+class DailyLimit(RuntimeError):
+    """Every model's free daily token allowance is used up; reviews must wait."""
+
+
+def _wait_text(msg: str) -> str | None:
+    """'Please try again in 1h0m6.3s' -> about 1 h 1 min."""
+    import re
+    m = re.search(r"try again in\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:([\d.]+)s)?", msg)
+    if not m or not any(m.groups()):
+        return None
+    mins = int(m.group(1) or 0) * 60 + int(m.group(2) or 0) + (1 if float(m.group(3) or 0) else 0)
+    return f"{mins // 60} h {mins % 60} min" if mins >= 60 else f"{max(1, mins)} min"
+
+
+def _mins(w: str) -> int:
+    import re
+    h = re.search(r"(\d+) h", w)
+    m = re.search(r"(\d+) min", w)
+    return int(h.group(1) if h else 0) * 60 + int(m.group(1) if m else 0)
+
+
 def _err_text(e) -> str:
     try:
         body = e.body if isinstance(e.body, dict) else {}
@@ -233,7 +254,7 @@ def _err_text(e) -> str:
 
 
 def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tuple[str, str] | None = None,
-               on_wait=None, max_out: int = 8000, what: str = "review this call") -> str:
+               on_wait=None, max_out: int = 8000, what: str = "review this call", models: list[str] | None = None) -> str:
     """Call Groq. Per model: try the full request; if it's too big, try the lighter one (if given); if a
     per-minute limit is hit, wait as long as Groq asks (up to ~1 minute) and try again. Then move on to
     the next available model. The error lists Groq's own reason for every model tried."""
@@ -242,10 +263,10 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
     import groq
 
     client = groq.Groq()
-    problems = []
-    for model in _groq_models(settings, client):
+    problems, daily = [], []
+    for model in models or _groq_models(settings, client):
         attempts = [("full", system, user, max_out)] + ([("lighter", lite[0], lite[1], min(max_out, 4500))] if lite else [])
-        i, waited = 0, False
+        i, waited, json_retry = 0, False, False
         while i < len(attempts):
             label, sys_msg, user_msg, max_out = attempts[i]
             kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
@@ -268,6 +289,8 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
                     time.sleep(wait + 1)
                     continue
                 problems.append(f"{model}: limit reached ({_err_text(e)})")
+                if "per day" in _err_text(e).lower():
+                    daily.append(_wait_text(_err_text(e)) or "")
                 break
             except groq.APIStatusError as e:
                 code = e.status_code
@@ -277,10 +300,21 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
                         continue
                     problems.append(f"{model}: too long ({_err_text(e)})")
                     break
+                if code == 400 and "json" in _err_text(e).lower() and not json_retry:
+                    json_retry = True          # the model fumbled the JSON format: one more try
+                    continue
                 if code in (400, 403, 404):
                     problems.append(f"{model}: {_err_text(e)}")
                     break
                 raise
+    if daily:
+        waits = [w for w in daily if w]
+        err = DailyLimit("The free AI's daily limit is used up for today (Groq free tier: about 200,000 tokens per "
+                         "model per day, roughly 20-30 calls)." + (f" It frees up again in about {min(waits, key=_mins)}."
+                                                                   if waits else "")
+                         + " The transcript is saved: use 🔁 Retry then. Details: " + " | ".join(problems))
+        err.wait = min(waits, key=_mins) if waits else ""
+        raise err
     hint = (" You can retry it later from the failed-calls list (🔁 Retry)." if what == "review this call"
             else " Try again in a minute, or with fewer calls selected.")
     raise RuntimeError(f"Groq couldn't {what} on the free tier: " + " | ".join(problems) + "." + hint
@@ -549,7 +583,8 @@ How to tell them apart:
   A line that continues an unfinished sentence belongs to the same speaker. For garbled or repeated noise lines
   (e.g. the same short phrase repeated during silence), use the surrounding context.
 
-Return ONLY JSON: {{"labels": "0:E 1:C 2:C ..."}} with every line number exactly once, E = executive, C = customer."""
+Return ONLY JSON: {{"labels": "0-2:E 3:C 4-9:E ..."}}: consecutive line ranges in order, covering every line
+exactly once, E = executive, C = customer. Keep it short: no explanations."""
 
 
 def detect_speakers(segments: list[dict], settings: dict) -> list[int] | None:
@@ -560,13 +595,21 @@ def detect_speakers(segments: list[dict], settings: dict) -> list[int] | None:
         return None
     lines = "\n".join(f"{i}: {' '.join(str(s.get('text', '')).split())}" for i, s in enumerate(segments))
     system = SPEAKER_SYSTEM.format(company=settings["company"]["name"])
+    import groq
     try:
-        out = _groq_chat(system, lines, settings, json_mode=True, max_out=max(1500, 12 * len(segments)),
-                         what="work out the speakers")
+        client = groq.Groq()
+        main = _groq_models(settings, client)
+        # Prefer models outside the review chain, so this check doesn't eat the reviews' daily allowance.
+        others = [m for m in (_available_models(client) or []) if m not in main[:2]]
+        out = _groq_chat(system, lines, settings, json_mode=True, max_out=1000, what="work out the speakers",
+                         models=(others or main)[:3])
         labels = json.loads(out).get("labels", "")
     except Exception:  # noqa: BLE001 - best effort; keep the review's labels
         return None
-    found = {int(n): who.upper() for n, who in re.findall(r"(\d+)\s*[:=]\s*([ECec])", str(labels))}
+    found = {}
+    for a, b, who in re.findall(r"(\d+)\s*(?:-\s*(\d+))?\s*[:=]\s*([ECec])", str(labels)):
+        for i in range(int(a), int(b or a) + 1):
+            found[i] = who.upper()
     if len(found) < 0.8 * len(segments):
         return None
     return sorted(i for i, w in found.items() if w == "E" and i < len(segments))

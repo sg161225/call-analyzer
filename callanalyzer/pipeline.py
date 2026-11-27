@@ -17,7 +17,11 @@ def guess_meta(file_name: str) -> dict:
     return parse_file_name(file_name)
 
 
-def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = None) -> int:
+WAITING = "Not reviewed yet: the free AI's daily limit was used up during this upload. The transcript is saved: use 🔁 Retry later."
+
+
+def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = None, review: bool = True) -> int:
+    """Transcribe, store and review one call. review=False only saves the transcript (to review later)."""
     call_id = store.add_call(meta)
     try:
         suffix = Path(meta["file_name"]).suffix or ".wav"
@@ -34,6 +38,12 @@ def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = N
         if len(segments_text(segments).strip()) < 20:
             raise RuntimeError("Almost no speech was recognised in this recording.")
         store.save_transcript(call_id, segments if keep else [], stats, dur)
+        if not review:
+            if not keep:
+                raise RuntimeError("The free AI's daily limit is used up, and recordings/transcripts aren't kept "
+                                   "(keep_recordings is off), so upload this call again later.")
+            store.save_error(call_id, WAITING)
+            return call_id
         review = review_call(timed_transcript(segments), {**meta, "duration_sec": round(dur)}, settings)
         _speakers(review, segments, settings)
         store.save_review(call_id, review, dur)
