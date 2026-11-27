@@ -75,12 +75,16 @@ sees the same data. Each push to GitHub updates the online app automatically.
    GROQ_API_KEY = "gsk_your_groq_key"
    DATABASE_URL = "postgresql://...your Neon connection string..."
    APP_PASSWORD = "choose-a-team-password"
+   # optional: more free reviews per day (https://cloud.cerebras.ai → API Keys)
+   CEREBRAS_API_KEY = "csk-your_cerebras_key"
    ```
 4. Click **Deploy**. The first start takes 3–5 minutes. You get a link like `https://busy-call-analyzer.streamlit.app`.
 
 Share the link and the password with your team. Without the password, people only see the sign-in box.
 
 **Good to know**
+- Groq's free tier reviews roughly 20-30 calls a day. With an optional free **Cerebras** key (Settings page locally,
+  or `CEREBRAS_API_KEY` in Secrets online), reviews continue on Cerebras once Groq's daily limit is reached.
 - Change keys or the password later in share.streamlit.io → your app's **⋮** menu → **Settings → Secrets**.
 - On the free plan the app sleeps after a few days without visitors; opening the link shows a
   "wake up" button and it starts again in about a minute. Your reviews are safe in Neon.

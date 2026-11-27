@@ -22,6 +22,7 @@ def load_settings() -> dict:
 
 ENV_PATH = ROOT / ".env"
 KEY_NAMES = {"GROQ_API_KEY": "Groq (free: transcription + review)",
+             "CEREBRAS_API_KEY": "Cerebras (free: extra reviews when Groq's daily limit is reached, optional)",
              "ANTHROPIC_API_KEY": "Anthropic (paid review, optional)",
              "SARVAM_API_KEY": "Sarvam (paid transcription, optional)",
              "OPENAI_API_KEY": "OpenAI (paid transcription, optional)"}
@@ -48,6 +49,7 @@ def missing_keys(settings: dict, engine: str | None = None) -> list[str]:
 def key_status() -> dict[str, bool]:
     return {
         "Groq (transcription + review)": bool(os.environ.get("GROQ_API_KEY")),
+        "Cerebras (extra free reviews)": bool(os.environ.get("CEREBRAS_API_KEY")),
         "Anthropic (analysis)": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
         "Sarvam (transcription)": bool(os.environ.get("SARVAM_API_KEY")),
         "OpenAI (transcription)": bool(os.environ.get("OPENAI_API_KEY")),

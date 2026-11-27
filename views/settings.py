@@ -22,6 +22,16 @@ with st.expander("How to get a free Groq key (2 minutes, no card)", expanded="GR
         "2. Click **API Keys** → **Create API Key** → give it any name → **Submit**.\n"
         "3. Copy the key (it starts with `gsk_`) and paste it below.")
 
+with st.expander("Optional: add a free Cerebras key for more reviews per day"):
+    st.markdown(
+        "Groq's free tier reviews roughly 20-30 calls a day. With a Cerebras key, reviews continue on Cerebras "
+        "when Groq's limit is reached (transcription still uses Groq).\n\n"
+        "1. Go to **https://cloud.cerebras.ai** and sign up (free, no card).\n"
+        "2. Open **API Keys** and copy your key (it starts with `csk-`).\n"
+        "3. Paste it in the **Cerebras** box below and click **Save keys**"
+        + (" (online version: add `CEREBRAS_API_KEY = \"csk-...\"` in Streamlit Secrets)." if os.environ.get("CALL_ANALYZER_FROM_SECRETS") == "1" else "."))
+
+
 def _mask(v: str) -> str:
     return f"{v[:4]}…{v[-4:]}" if len(v) > 10 else "saved"
 
@@ -57,6 +67,9 @@ else:
         entered = {n: v.strip().strip('"').strip("'").replace(" ", "") for n, v in values.items() if v.strip()}
         if not entered:
             st.session_state["key_msg"] = (False, "Nothing was pasted. Click inside the Groq box, paste (Ctrl+V), then click Save keys.")
+        elif "CEREBRAS_API_KEY" in entered and not entered["CEREBRAS_API_KEY"].startswith("csk"):
+            st.session_state["key_msg"] = (False, "That doesn't look like a Cerebras key: it should start with csk-. "
+                                                  "Copy it again from cloud.cerebras.ai → API Keys.")
         elif "GROQ_API_KEY" in entered and not entered["GROQ_API_KEY"].startswith("gsk_"):
             st.session_state["key_msg"] = (False, "That doesn't look like a Groq key: it should start with gsk_. "
                                                   "Copy it again from console.groq.com → API Keys.")
@@ -65,13 +78,22 @@ else:
                 for n, v in entered.items():
                     save_key(n, v)
                 ok, text = _test_groq() if "GROQ_API_KEY" in entered else (True, "")
+                if "CEREBRAS_API_KEY" in entered:
+                    from callanalyzer.cerebras import test_key
+                    ok2, text2 = test_key()
+                    ok, text = ok and ok2, f"{text} {text2}".strip()
                 st.session_state["key_msg"] = (ok, f"Saved {len(entered)} key(s). {text}")
             except OSError as e:
                 st.session_state["key_msg"] = (False, f"Could not write the key file: {e}")
         st.rerun()
 
-if os.environ.get("GROQ_API_KEY") and st.button("Test Groq key"):
+tc1, tc2, _ = st.columns([1, 1, 3])
+if os.environ.get("GROQ_API_KEY") and tc1.button("Test Groq key"):
     ok, text = _test_groq()
+    (st.success if ok else st.error)(text)
+if os.environ.get("CEREBRAS_API_KEY") and tc2.button("Test Cerebras key"):
+    from callanalyzer.cerebras import test_key
+    ok, text = test_key()
     (st.success if ok else st.error)(text)
 
 if not HOSTED:

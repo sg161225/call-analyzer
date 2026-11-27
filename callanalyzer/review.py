@@ -264,6 +264,7 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
 
     client = groq.Groq()
     problems, daily = [], []
+    max_out0 = max_out
     for model in models or _groq_models(settings, client):
         attempts = [("full", system, user, max_out)] + ([("lighter", lite[0], lite[1], min(max_out, 4500))] if lite else [])
         i, waited, json_retry = 0, False, False
@@ -307,10 +308,22 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
                     problems.append(f"{model}: {_err_text(e)}")
                     break
                 raise
+    # Second free provider (optional): Cerebras, when Groq's limits are reached.
+    from . import cerebras
+    if cerebras.has_key():
+        try:
+            return cerebras.chat(system, user, json_mode, lite, max_out0, settings["analysis"].get("effort", "medium"),
+                                 on_wait)
+        except cerebras.CerebrasFailed as ce:
+            problems += ce.problems
+            if daily and not ce.daily and not any("limit" in p for p in ce.problems):
+                daily = []          # Cerebras failed for another reason: show the plain error
+            daily += ce.daily
     if daily:
         waits = [w for w in daily if w]
         err = DailyLimit("The free AI's daily limit is used up for today (Groq free tier: about 200,000 tokens per "
-                         "model per day, roughly 20-30 calls)." + (f" It frees up again in about {min(waits, key=_mins)}."
+                         "model per day, roughly 20-30 calls" + (", and Cerebras's free limit too" if cerebras.has_key() else "")
+                         + ")." + (f" It frees up again in about {min(waits, key=_mins)}."
                                                                    if waits else "")
                          + " The transcript is saved: use 🔁 Retry then. Details: " + " | ".join(problems))
         err.wait = min(waits, key=_mins) if waits else ""
