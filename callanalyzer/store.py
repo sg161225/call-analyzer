@@ -52,6 +52,8 @@ reports = Table(
     Column("created_at", Text, nullable=False),
     Column("scope", Text),
     Column("content_md", Text, nullable=False),
+    Column("content_json", Text),   # structured report for the visual dashboard
+    Column("call_ids", Text),       # JSON list of the calls the report covers
 )
 
 
@@ -93,6 +95,11 @@ def engine() -> Engine:
 
 def _migrate(eng: Engine) -> None:
     """Upgrade databases created by older versions of the app."""
+    rcols = {c["name"] for c in inspect(eng).get_columns("reports")}
+    for col in ("content_json", "call_ids"):
+        if col not in rcols:
+            with eng.begin() as con:
+                con.execute(text(f"ALTER TABLE reports ADD COLUMN {col} TEXT"))
     cols = {c["name"] for c in inspect(eng).get_columns("calls")}
     if "mobile" not in cols:
         from .filenames import parse_file_name
@@ -247,11 +254,17 @@ def load_calls() -> pd.DataFrame:
     return df
 
 
-def save_report(scope: str, content_md: str) -> None:
+def save_report(scope: str, content_md: str, data: dict | None = None, call_ids: list[int] | None = None) -> None:
     with engine().begin() as con:
-        con.execute(insert(reports).values(created_at=_now(), scope=scope, content_md=content_md))
+        con.execute(insert(reports).values(created_at=_now(), scope=scope, content_md=content_md,
+                                           content_json=json.dumps(data, ensure_ascii=False) if data else None,
+                                           call_ids=json.dumps([int(i) for i in call_ids]) if call_ids else None))
 
 
 def load_reports() -> list[dict]:
     with engine().connect() as con:
-        return [dict(r._mapping) for r in con.execute(select(reports).order_by(reports.c.id.desc()))]
+        out = [dict(r._mapping) for r in con.execute(select(reports).order_by(reports.c.id.desc()))]
+    for r in out:
+        r["data"] = json.loads(r["content_json"]) if r.get("content_json") else None
+        r["ids"] = json.loads(r["call_ids"]) if r.get("call_ids") else []
+    return out

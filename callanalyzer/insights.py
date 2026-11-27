@@ -173,21 +173,87 @@ executive-specific issues. Name executives and dates as evidence. No introductio
 
 FINAL_INSTRUCTIONS = """
 You get (1) EXACT FIGURES calculated by the app — use these numbers as given, never recalculate or invent numbers —
-and (2) per-call lines or batch observations as evidence. Write the report in Markdown with these sections:
+and (2) per-call lines or batch observations as evidence. Return ONLY a JSON object with exactly these keys:
 
-1. **Headline**: 3 bullets with the most important findings.
-2. **What is working**: behaviours linked to good outcomes, with call examples (executive + date).
-3. **What is not working**: recurring weaknesses, fatal errors, lost-call reasons, unresolved queries.
-4. **Executive comparison**: a table (executive, calls, avg score, success, fatal calls, key coaching point), then
-   1-2 lines per executive.
-5. **Product knowledge & objections**: FAQ answers to fix and objections where the playbook isn't followed.
-6. **Pitch changes over time**: only if pitch versions or dates allow it; say clearly when there is too little data.
-7. **Process improvements**: concrete changes to the script, pre-call preparation, offers, escalation, follow-up.
+{
+ "headline": [{"title": "<6-10 words>", "detail": "<1-2 sentences with numbers from EXACT FIGURES>",
+               "tone": "good" | "bad" | "neutral"}],                       // exactly 3
+ "working": [{"point": "<behaviour linked to good outcomes>", "evidence": "<executive + date / numbers>"}],   // 2-5
+ "not_working": [{"point": "<recurring weakness, fatal error, loss reason or unresolved query>",
+                  "evidence": "<executive + date / numbers>"}],          // 2-6
+ "executives": [{"name": "<executive exactly as in EXACT FIGURES>", "strength": "<one line>",
+                 "coaching": "<the single most important coaching point>"}],   // every executive
+ "product_and_objections": [{"point": "<FAQ answer to fix or objection where the playbook isn't followed>",
+                             "evidence": "<numbers / examples>"}],       // 0-5
+ "pitch_changes": "<pitch versions or changes over dates; say clearly when there is too little data>",
+ "improvements": [{"action": "<concrete change to script, preparation, offers, escalation or follow-up>",
+                   "why": "<the finding it fixes>", "priority": "High" | "Medium" | "Low"}]   // 3-7
+}
 
-Keep it concise and practical. Mention sample sizes and don't overstate patterns from 1-2 calls."""
+Say which call type a finding applies to. Keep every string short and practical. Mention sample sizes and
+don't overstate patterns from 1-2 calls."""
+
+KEYS = ("headline", "working", "not_working", "executives", "product_and_objections", "pitch_changes", "improvements")
 
 
-def build_report(rows: list[dict], settings: dict, focus: str = "", progress=None) -> str:
+def parse_json(text: str) -> dict | None:
+    import json
+    import re
+    text = (text or "").strip()
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except ValueError:
+        return None
+    if not isinstance(d, dict) or not any(k in d for k in KEYS):
+        return None
+    lst = lambda v: [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []  # noqa: E731
+    out = {k: lst(d.get(k)) for k in KEYS if k != "pitch_changes"}
+    out["pitch_changes"] = str(d.get("pitch_changes") or "")
+    for h in out["headline"]:
+        h["tone"] = h.get("tone") if h.get("tone") in ("good", "bad", "neutral") else "neutral"
+    for i in out["improvements"]:
+        i["priority"] = str(i.get("priority") or "Medium").title()
+        if i["priority"] not in ("High", "Medium", "Low"):
+            i["priority"] = "Medium"
+    return out
+
+
+def to_markdown(d: dict, rows: list[dict]) -> str:
+    """Readable report (for the PDF / Markdown download) from the structured one plus the app's exact figures."""
+    rows = clean(rows)
+    cut = lambda t: " ".join(str(t or "").split()).replace("|", "/")  # noqa: E731
+    md = ["## Headline"] + [f"- **{cut(h.get('title'))}**: {cut(h.get('detail'))}" for h in d["headline"]]
+    md += ["", "## What is working"] + [f"- **{cut(w.get('point'))}** ({cut(w.get('evidence'))})" for w in d["working"]]
+    md += ["", "## What is not working"] + [f"- **{cut(w.get('point'))}** ({cut(w.get('evidence'))})" for w in d["not_working"]]
+    by_e = defaultdict(list)
+    for r in rows:
+        by_e[r.get("executive") or "Unknown"].append(r)
+    coach = {str(e.get("name", "")).strip().lower(): e for e in d["executives"]}
+    md += ["", "## Executive comparison", "| Executive | Calls | Avg score | Success | Fatal calls | Key coaching point |",
+           "|---|---|---|---|---|---|"]
+    for e, rs in sorted(by_e.items(), key=lambda x: -len(x[1])):
+        sc = [r.get("overall_score") or 0 for r in rs]
+        ok = sum(is_success(_type(r), r.get("outcome", ""), r.get("risk_level", "None")) for r in rs)
+        md.append(f"| {e} | {len(rs)} | {sum(sc) / len(sc):.1f} | {_pct(ok, len(rs))} | "
+                  f"{sum(bool(r.get('fatal_errors')) for r in rs)} | {cut(coach.get(e.lower(), {}).get('coaching'))} |")
+    for e in d["executives"]:
+        if e.get("strength"):
+            md.append(f"\n**{cut(e.get('name'))}**: strength: {cut(e.get('strength'))}. Coach: {cut(e.get('coaching'))}")
+    if d["product_and_objections"]:
+        md += ["", "## Product knowledge & objections"] + [f"- **{cut(w.get('point'))}** ({cut(w.get('evidence'))})"
+                                                           for w in d["product_and_objections"]]
+    if d["pitch_changes"]:
+        md += ["", "## Pitch changes over time", cut(d["pitch_changes"])]
+    order = {"High": 0, "Medium": 1, "Low": 2}
+    md += ["", "## Process improvements"] + [f"{i}. **[{x['priority']}] {cut(x.get('action'))}**: {cut(x.get('why'))}"
+                                            for i, x in enumerate(sorted(d["improvements"], key=lambda x: order[x["priority"]]), 1)]
+    return "\n".join(md)
+
+
+def build_report(rows: list[dict], settings: dict, focus: str = "", progress=None) -> dict:
     from .review import INSIGHTS_SYSTEM, _client, _groq_chat, _provider
 
     company = settings["company"]
@@ -207,7 +273,10 @@ def build_report(rows: list[dict], settings: dict, focus: str = "", progress=Non
             msg = stream.get_final_message()
         if msg.stop_reason == "refusal":
             raise RuntimeError("The AI declined to write this report.")
-        return "".join(b.text for b in msg.content if b.type == "text")
+        data = parse_json("".join(b.text for b in msg.content if b.type == "text"))
+        if data is None:
+            raise RuntimeError("The AI's report came back in the wrong format. Please click Generate report again.")
+        return {"md": to_markdown(data, rows), "data": data}
 
     joined = "\n".join(lines)
     if len(joined) <= BATCH_CHARS:
@@ -231,4 +300,8 @@ def build_report(rows: list[dict], settings: dict, focus: str = "", progress=Non
     if progress:
         progress("Writing the report…")
     user = f"{head}\nEXACT FIGURES\n{stats}\n\n{evidence}"
-    return _groq_chat(system, user, settings, json_mode=False, max_out=3500, what="write this report")
+    text = _groq_chat(system, user, settings, json_mode=True, max_out=4000, what="write this report")
+    data = parse_json(text)
+    if data is None:
+        raise RuntimeError("The AI's report came back in the wrong format. Please click Generate report again.")
+    return {"md": to_markdown(data, rows), "data": data}

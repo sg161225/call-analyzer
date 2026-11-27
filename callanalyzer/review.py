@@ -626,6 +626,6 @@ Markdown with these sections:
 Only use evidence present in the data. Mention sample size, and do not overstate patterns seen in 1-2 calls."""
 
 
-def insights_report(rows: list[dict], settings: dict, focus: str = "", progress=None) -> str:
+def insights_report(rows: list[dict], settings: dict, focus: str = "", progress=None) -> dict:
     from .insights import build_report
     return build_report(rows, settings, focus, progress)
