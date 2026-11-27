@@ -36,8 +36,9 @@ keyterms = ["BUSY", "voucher", "GST", "invoice", "e-way bill", "renewal", "mobil
 provider = "groq"
 # Groq model. Alternatives: "llama-3.3-70b-versatile", "openai/gpt-oss-20b"
 groq_model = "openai/gpt-oss-120b"
-# Tried in order when a call is too long for the model above, or its free per-minute limit is reached
-groq_fallback_models = ["llama-3.3-70b-versatile", "meta-llama/llama-4-scout-17b-16e-instruct"]
+# Extra models to try first when a call is too long for the model above or its free per-minute limit is
+# reached. Optional: the app also asks Groq which models your account can use and tries those automatically.
+groq_fallback_models = ["openai/gpt-oss-20b"]
 # Anthropic model (used only when provider = "anthropic")
 model = "claude-opus-5-5"
 # low | medium | high: higher = more thorough, slower (and costlier on paid providers)

@@ -33,10 +33,37 @@ def process_call(data: bytes, meta: dict, settings: dict, engine: str | None = N
                 store.save_recording(call_id, to_mp3(wav, Path(tmp) / "call.mp3"), "audio/mpeg", peaks(wav))
         if len(segments_text(segments).strip()) < 20:
             raise RuntimeError("Almost no speech was recognised in this recording.")
-        store.save_transcript(call_id, segments if keep else [], stats)
+        store.save_transcript(call_id, segments if keep else [], stats, dur)
         review = review_call(timed_transcript(segments), {**meta, "duration_sec": round(dur)}, settings)
         store.save_review(call_id, review, dur)
     except Exception as e:  # stored so the dashboard can show what failed
         store.save_error(call_id, f"{type(e).__name__}: {e}")
         raise
     return call_id
+
+
+def can_retry(raw_row) -> bool:
+    """A failed call can be re-reviewed without re-uploading when its transcript was saved."""
+    return bool(raw_row.get("segments"))
+
+
+def retry_review(call_id: int, settings: dict) -> None:
+    """Run only the AI review again, from the saved transcript (no new transcription)."""
+    df = store.load_calls()
+    row = df[df["id"] == call_id].iloc[0]
+    segments = row["segments"]
+    if not segments:
+        raise RuntimeError("No saved transcript for this call: remove it and upload the recording again.")
+    d = row.get("duration_sec")
+    dur = float(d) if d is not None and d == d and float(d) > 0 else float(segments[-1].get("end") or 0)  # d == d: not NaN
+    s = lambda v: "" if v is None or (isinstance(v, float) and v != v) else str(v)  # noqa: E731 (NaN -> "")
+    meta = {"file_name": row["file_name"], "executive": s(row.get("executive")), "mobile": s(row.get("mobile")),
+            "call_date": s(row.get("call_date")), "campaign": s(row.get("campaign")),
+            "pitch_version": s(row.get("pitch_version")), "call_type": s(row.get("call_type")) or None,
+            "duration_sec": round(dur)}
+    try:
+        review = review_call(timed_transcript(segments), meta, settings)
+    except Exception as e:
+        store.save_error(call_id, f"{type(e).__name__}: {e}")
+        raise
+    store.save_review(call_id, review, dur)

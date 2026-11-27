@@ -152,10 +152,12 @@ def save_review(call_id: int, review: dict, duration: float) -> None:
             duration_sec=float(duration), call_type=review.get("call_type")))
 
 
-def save_transcript(call_id: int, segments: list, audio_stats: dict) -> None:
+def save_transcript(call_id: int, segments: list, audio_stats: dict, duration: float | None = None) -> None:
+    values = {"transcript_json": json.dumps(segments, ensure_ascii=False), "audio_stats": json.dumps(audio_stats)}
+    if duration:
+        values["duration_sec"] = float(duration)
     with engine().begin() as con:
-        con.execute(update(calls).where(calls.c.id == call_id).values(
-            transcript_json=json.dumps(segments, ensure_ascii=False), audio_stats=json.dumps(audio_stats)))
+        con.execute(update(calls).where(calls.c.id == call_id).values(**values))
 
 
 def save_recording(call_id: int, audio: bytes, mime: str, peaks: list) -> None:

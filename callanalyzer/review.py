@@ -187,41 +187,100 @@ def _provider(settings: dict) -> str:
     return settings["analysis"].get("provider", "groq")
 
 
-def _groq_models(settings: dict) -> list[str]:
+# Free Groq models that work for reviews, in order of preference (used when available on the account).
+PREFERRED_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile",
+                    "meta-llama/llama-4-scout-17b-16e-instruct", "moonshotai/kimi-k2-instruct",
+                    "meta-llama/llama-4-maverick-17b-128e-instruct", "qwen/qwen3-32b", "llama-3.1-8b-instant"]
+_NOT_CHAT = ("whisper", "guard", "tts", "playai", "orpheus", "distil", "compound", "safeguard", "allam")
+_AVAILABLE: dict = {"at": 0.0, "ids": None}
+MAX_MODELS = 5
+
+
+def _available_models(client) -> list[str] | None:
+    """Chat models this Groq account can use right now (cached for an hour); None if unknown."""
+    import time
+    if _AVAILABLE["ids"] is not None and time.time() - _AVAILABLE["at"] < 3600:
+        return _AVAILABLE["ids"]
+    try:
+        ids = [m.id for m in client.models.list().data if not any(x in m.id.lower() for x in _NOT_CHAT)
+               and getattr(m, "active", True) is not False]
+    except Exception:
+        return None
+    _AVAILABLE.update(at=time.time(), ids=ids)
+    return ids
+
+
+def _groq_models(settings: dict, client=None) -> list[str]:
     a = settings["analysis"]
-    chain = [a.get("groq_model", "openai/gpt-oss-120b"), *a.get("groq_fallback_models",
-             ["llama-3.3-70b-versatile", "meta-llama/llama-4-scout-17b-16e-instruct"])]
-    return list(dict.fromkeys(m for m in chain if m))
+    chain = [a.get("groq_model", "openai/gpt-oss-120b"), *a.get("groq_fallback_models", []), *PREFERRED_MODELS]
+    chain = list(dict.fromkeys(m for m in chain if m))
+    avail = _available_models(client) if client is not None else None
+    if avail:
+        chain = [m for m in chain if m in avail] + sorted(m for m in avail if m not in chain)
+    return chain[:MAX_MODELS]
 
 
-def _groq_chat(system: str, user: str, settings: dict, json_mode: bool) -> str:
-    """Call Groq; if a request is too big for a model or hits its per-minute limit, try the
-    fallback models (each has its own free-tier limits) before giving up."""
+def _err_text(e) -> str:
+    try:
+        body = e.body if isinstance(e.body, dict) else {}
+        msg = (body.get("error") or {}).get("message") or str(e)
+    except Exception:
+        msg = str(e)
+    return " ".join(str(msg).split())[:160]
+
+
+def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tuple[str, str] | None = None,
+               on_wait=None) -> str:
+    """Call Groq. Per model: try the full request; if it's too big, try the lighter one (if given); if a
+    per-minute limit is hit, wait as long as Groq asks (up to ~1 minute) and try again. Then move on to
+    the next available model. The error lists Groq's own reason for every model tried."""
+    import time
+
     import groq
 
     client = groq.Groq()
     problems = []
-    for model in _groq_models(settings):
-        kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
-        if model.startswith("openai/gpt-oss"):
-            kwargs["reasoning_effort"] = settings["analysis"].get("effort", "medium")
-        try:
-            resp = client.chat.completions.create(
-                model=model, temperature=0.2, max_completion_tokens=8000,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **kwargs)
-            return resp.choices[0].message.content or ""
-        except groq.RateLimitError:
-            problems.append(f"{model}: free-tier limit reached")
-        except groq.APIStatusError as e:
-            if e.status_code == 413:
-                problems.append(f"{model}: call too long for its free-tier limit")
-            elif e.status_code in (400, 404) and "model" in str(e).lower():
-                problems.append(f"{model}: model not available")
-            else:
+    for model in _groq_models(settings, client):
+        attempts = [("full", system, user, 8000)] + ([("lighter", lite[0], lite[1], 4500)] if lite else [])
+        i, waited = 0, False
+        while i < len(attempts):
+            label, sys_msg, user_msg, max_out = attempts[i]
+            kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
+            if model.startswith("openai/gpt-oss"):
+                kwargs["reasoning_effort"] = "low" if label == "lighter" else settings["analysis"].get("effort", "medium")
+            try:
+                resp = client.chat.completions.create(
+                    model=model, temperature=0.2, max_completion_tokens=max_out,
+                    messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}], **kwargs)
+                return resp.choices[0].message.content or ""
+            except groq.RateLimitError as e:
+                try:
+                    wait = float(e.response.headers.get("retry-after") or 0)
+                except (TypeError, ValueError, AttributeError):
+                    wait = 0
+                if not waited and 0 < wait <= 65:
+                    waited = True
+                    if on_wait:
+                        on_wait(model, wait)
+                    time.sleep(wait + 1)
+                    continue
+                problems.append(f"{model}: limit reached ({_err_text(e)})")
+                break
+            except groq.APIStatusError as e:
+                code = e.status_code
+                if code == 413 or (code == 400 and "reduce the length" in _err_text(e).lower()):
+                    if i + 1 < len(attempts):
+                        i += 1
+                        continue
+                    problems.append(f"{model}: too long ({_err_text(e)})")
+                    break
+                if code in (400, 403, 404):
+                    problems.append(f"{model}: {_err_text(e)}")
+                    break
                 raise
-    raise RuntimeError("Groq couldn't take this call on the free tier (" + "; ".join(problems) + "). "
-                       "Wait a minute and retry. If it keeps happening, the daily limit may be used up "
-                       "(it resets the next day), or the call may be too long for the free tier.")
+    raise RuntimeError("Groq couldn't review this call on the free tier. " + " | ".join(problems)
+                       + ". You can retry it later from the failed-calls list (🔁 Retry); limits reset every "
+                       "minute and every day.")
 
 
 def _compact_schema() -> str:
@@ -305,18 +364,43 @@ def _parse_review(raw: str) -> dict:
     return CallReview.model_validate(data).model_dump()
 
 
-def _review_groq(system: str, user: str, settings: dict) -> dict:
+def _with_format(system: str) -> str:
+    return (system + "\n\n" + FIELD_NOTES + "\n\nReply with ONE JSON object only, no prose, matching this JSON "
+            "Schema exactly (all fields required; enums must use the exact listed values):\n" + _compact_schema())
+
+
+def _review_groq(system: str, user: str, settings: dict, lite: tuple[str, str] | None = None) -> dict:
     """JSON mode + schema in the prompt; small slips repaired, then validated; one corrective retry."""
-    system = (system + "\n\n" + FIELD_NOTES + "\n\nReply with ONE JSON object only, no prose, matching this JSON "
-              "Schema exactly (all fields required; enums must use the exact listed values):\n" + _compact_schema())
-    raw = _groq_chat(system, user, settings, json_mode=True)
+    system = _with_format(system)
+    lite = (_with_format(lite[0]), lite[1]) if lite else None
+    raw = _groq_chat(system, user, settings, json_mode=True, lite=lite)
     try:
         return _parse_review(raw)
     except Exception as err:  # bad JSON, or a problem the repair step can't fix
         fix = (user + "\n\nYour previous reply did not match the schema. Error:\n" + str(err)[:1500]
                + "\nReturn the corrected JSON object only.")
-        raw = _groq_chat(system, fix, settings, json_mode=True)
+        raw = _groq_chat(system, fix, settings, json_mode=True, lite=lite)
         return _parse_review(raw)
+
+
+def lighter_transcript(transcript: str, block_sec: int = 30) -> str:
+    """Merge numbered lines into ~30-second blocks with one time stamp each (smaller request)."""
+    import re
+    out, cur, start = [], [], None
+    for line in transcript.splitlines():
+        m = re.match(r"^\[(\d+) \| (\d+):(\d+)\]\s*(.*)$", line)
+        if not m:
+            return transcript
+        t = int(m.group(2)) * 60 + int(m.group(3))
+        if start is None:
+            start = t
+        if t - start >= block_sec and cur:
+            out.append(f"[{start // 60:02d}:{start % 60:02d}] " + " ".join(cur))
+            cur, start = [], t
+        cur.append(m.group(4))
+    if cur:
+        out.append(f"[{start // 60:02d}:{start % 60:02d}] " + " ".join(cur))
+    return "\n".join(out)
 
 
 def _words(t: str) -> set[str]:
@@ -463,9 +547,6 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
     context = f"{company['name']}: {company['product']}\n{company['context'].strip()}"
     hint = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else "not given (decide from the call)"
     dur = int(meta.get("duration_sec") or 0)
-    user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
-            f"length={dur // 60}:{dur % 60:02d}, "
-            f"campaign={meta.get('campaign') or 'unknown'}, call type={hint}\n\n<transcript>\n{transcript}\n</transcript>")
     forced = meta.get("call_type") if meta.get("call_type") in CALL_TYPES else None
     # Send only what this call needs when the type is known (keeps requests inside free-tier limits).
     if forced and forced not in PLAYBOOKS:
@@ -475,19 +556,30 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
               "objection name from THAT type's playbook (or 'Other'), and judge whether the executive used the "
               "recommended responses. For any other call type return an empty objections list.\n"
               + playbook_prompt(forced))
-    faqs = relevant_faqs(forced, transcript) if forced else []
-    if faqs:
-        faq = ("below are the company's official answers to product questions likely raised in this call. For EVERY "
-               "product question the customer asked, give faq_no (0 if none of these covers it), the executive's answer "
-               "and its accuracy against the official answer. A Wrong answer about price, offers, policy or a feature "
-               "that doesn't exist is also a fatal error 'False information or a promise they can't make'.\n"
-               + faq_prompt(faqs))
-    else:
-        faq = "no FAQ list applies to this call; return an empty faq_answers list."
-    system = SYSTEM.format(context=context, types=", ".join(CALL_TYPES), quality=quality_prompt(),
-                           checklists=checklist_prompt(forced), playbook=pb, faq=faq)
+
+    def build(text: str, faq_k: int, note: str = "") -> tuple[str, str]:
+        faqs = relevant_faqs(forced, text, k=faq_k) if forced else []
+        if faqs:
+            faq = ("below are the company's official answers to product questions likely raised in this call. For EVERY "
+                   "product question the customer asked, give faq_no (0 if none of these covers it), the executive's "
+                   "answer and its accuracy against the official answer. A Wrong answer about price, offers, policy or "
+                   "a feature that doesn't exist is also a fatal error 'False information or a promise they can't make'.\n"
+                   + faq_prompt(faqs))
+        else:
+            faq = "no FAQ list applies to this call; return an empty faq_answers list."
+        system = SYSTEM.format(context=context, types=", ".join(CALL_TYPES), quality=quality_prompt(),
+                               checklists=checklist_prompt(forced), playbook=pb, faq=faq) + note
+        user = (f"Call metadata: executive={meta.get('executive') or 'unknown'}, date={meta.get('call_date') or 'unknown'}, "
+                f"length={dur // 60}:{dur % 60:02d}, "
+                f"campaign={meta.get('campaign') or 'unknown'}, call type={hint}\n\n<transcript>\n{text}\n</transcript>")
+        return system, user
+
+    system, user = build(transcript, 12)
+    light = lighter_transcript(transcript)
+    lite = build(light, 6, "\n\nIn this version the transcript is in ~30-second blocks without line numbers: use the "
+                           "[mm:ss] stamps for times and return an empty executive_lines list.") if light != transcript else None
     if _provider(settings) == "groq":
-        return _review_groq(system, user, settings)
+        return _review_groq(system, user, settings, lite=lite)
     resp = _client().beta.messages.parse(
         model=settings["analysis"]["model"],
         max_tokens=16000,

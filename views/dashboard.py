@@ -9,6 +9,8 @@ from views.common import BADGE, PARAMETERS, RATED, badge, checklist_summary, exp
 from callanalyzer.calltypes import CALL_TYPES
 from callanalyzer.quality import SHORT_FATAL, SOFT_SKILLS
 from callanalyzer import store
+from callanalyzer.config import load_settings
+from callanalyzer.pipeline import can_retry, retry_review
 
 # Status colours (good / warning / critical), always shown with a label.
 STATUS_DOMAIN = ["Good", "Partial", "Weak"]
@@ -33,12 +35,37 @@ st.title("📋 Call reviews")
 raw, flat = load_flat()
 
 failed = raw[raw["status"] == "error"]
+if msg := st.session_state.pop("retry_msg", None):
+    (st.success if msg[0] else st.error)(msg[1])
 if not failed.empty:
-    with st.expander(f"⚠️ {len(failed)} call(s) failed to process"):
+    retryable = [int(r["id"]) for _, r in failed.iterrows() if can_retry(r)]
+    with st.expander(f"⚠️ {len(failed)} call(s) failed to process", expanded=True):
+        st.caption("🔁 Retry runs only the AI review again from the saved transcript (no new transcription). "
+                   "Free-tier limits reset every minute and every day.")
+
+        def _retry(ids: list[int]) -> None:
+            ok, errs = 0, []
+            with st.spinner(f"Reviewing {len(ids)} call(s) again… this can take a minute per call."):
+                for cid in ids:
+                    try:
+                        retry_review(cid, load_settings())
+                        ok += 1
+                    except Exception as e:  # noqa: BLE001 - shown to the user
+                        errs.append(str(e)[:200])
+            st.session_state["retry_msg"] = (not errs, f"{ok} of {len(ids)} call(s) reviewed."
+                                             + (f" Still failing: {errs[0]}" if errs else ""))
+
+        if len(retryable) > 1:
+            st.button(f"🔁 Retry all {len(retryable)}", on_click=_retry, args=(retryable,), key="retry_all")
         for _, r in failed.iterrows():
-            c1, c2 = st.columns([6, 1])
-            c1.write(f"**{r['file_name']}**: {r['error']}")
-            if c2.button("Remove", key=f"rm_{r['id']}"):
+            c1, c2, c3 = st.columns([7, 1, 1])
+            c1.markdown(f"**{r['file_name']}**  \n<span style='opacity:.8;font-size:.88em'>{r['error']}</span>",
+                        unsafe_allow_html=True)
+            if int(r["id"]) in retryable:
+                c2.button("🔁 Retry", key=f"rt_{r['id']}", on_click=_retry, args=([int(r["id"])],), width="stretch")
+            else:
+                c2.caption("Upload again")
+            if c3.button("Remove", key=f"rm_{r['id']}", width="stretch"):
                 store.delete_call(int(r["id"]))
                 st.rerun()
 
