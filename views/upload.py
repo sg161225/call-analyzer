@@ -59,6 +59,11 @@ default = list(ENGINES).index(settings["transcription"]["engine"])
 engine = c1.selectbox("Speech-to-text engine", list(ENGINES), index=default, format_func=ENGINES.get)
 
 missing = missing_keys(settings, engine)
+def _t(v) -> str:
+    """Text from a table cell; empty cells can come back as None or NaN (a number)."""
+    return "" if v is None or (isinstance(v, float) and v != v) else str(v).strip()
+
+
 blank = [r["File"] for r in meta.to_dict("records") if not str(r.get("Executive") or "").strip()]
 if blank:
     st.warning(f"Fill in the **Executive** for: {', '.join(blank)}. (Double-click the cell to type.)")
@@ -76,10 +81,10 @@ if st.button(f"Analyse {len(files)} call(s)", type="primary", disabled=bool(miss
             try:
                 d = m["Call date"]
                 process_call(f.getvalue(), {
-                    "file_name": f.name, "executive": (m["Executive"] or "").strip(),
+                    "file_name": f.name, "executive": _t(m["Executive"]),
                     "mobile": "".join(ch for ch in str(m.get("Mobile") or "") if ch.isdigit())[-10:],
-                    "call_date": d.isoformat() if hasattr(d, "isoformat") else str(d),
-                    "campaign": (m["Campaign"] or "").strip(), "pitch_version": (m["Pitch version"] or "").strip(),
+                    "call_date": d.isoformat() if hasattr(d, "isoformat") and not pd.isna(d) else _t(d),
+                    "campaign": _t(m["Campaign"]), "pitch_version": _t(m["Pitch version"]),
                     "call_type": None if m.get("Call type") in (None, AUTO) else m["Call type"],
                 }, settings, engine)
                 s.update(label=f"{f.name}: done ✅", state="complete")

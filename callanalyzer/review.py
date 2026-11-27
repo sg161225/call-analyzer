@@ -450,7 +450,7 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
         rv["call_type"] = forced_type
     rv["call_type"] = canonical_type(rv.get("call_type"))
     official = CHECKLISTS.get(rv.get("call_type"), [])
-    given = {(c.get("item") or "").strip().lower(): c for c in rv.get("checklist") or []}
+    given = {str(c.get("item") or "").strip().lower(): c for c in rv.get("checklist") or []}
     fixed = []
     for item in official:
         key = item.lower()
@@ -466,14 +466,14 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
     for o in rv.get("objections") or []:
         if not names:
             break
-        name = _match_objection((o.get("objection") or "").strip(), names, rv.get("call_type"))
+        name = _match_objection(str(o.get("objection") or "").strip(), names, rv.get("call_type"))
         rec = o.get("recommended_response") or " / ".join(responses_for(rv.get("call_type"), name)[:2])
         objs.append({**o, "objection": name, "recommended_response": rec,
                      "playbook_followed": o.get("playbook_followed") if o.get("playbook_followed") in ("Yes", "Partly", "No") else "No"})
     rv["objections"] = objs
     answers = []
     for a in (rv.get("faq_answers") or []) if faqs_for(rv.get("call_type")) else []:
-        if not (a.get("customer_question") or "").strip():
+        if not str(a.get("customer_question") or "").strip():
             continue
         hit = None
         no = int(a.get("faq_no") or 0)
@@ -488,8 +488,8 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
     rv["faq_answers"] = answers
     fatal = []
     for f in rv.get("fatal_errors") or []:
-        if (f.get("category") or f.get("evidence") or "").strip():
-            fatal.append({"category": match_fatal((f.get("category") or "").strip()), "evidence": f.get("evidence", ""),
+        if str(f.get("category") or f.get("evidence") or "").strip():
+            fatal.append({"category": match_fatal(str(f.get("category") or "").strip()), "evidence": f.get("evidence", ""),
                           "time_sec": max(0, int(f.get("time_sec") or 0))})
     rv["fatal_errors"] = fatal
     rv["fatal"] = bool(fatal)
@@ -500,7 +500,7 @@ def normalize(rv: dict, forced_type: str | None = None) -> dict:
                                    "mood": m.get("mood", "Neutral")} for m in rv.get("mood_timeline") or []),
                                  key=lambda m: m["start_sec"])
     rv["executive_lines"] = sorted({int(i) for i in rv.get("executive_lines") or [] if str(i).lstrip("-").isdigit()})
-    d = (rv.get("next_step_date") or "").strip()
+    d = str(rv.get("next_step_date") or "").strip()
     try:
         rv["next_step_date"] = date.fromisoformat(d).isoformat() if d else ""
     except ValueError:

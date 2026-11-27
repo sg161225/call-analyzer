@@ -30,7 +30,7 @@ mobile app application busy use using get want need like same also""".split())
 
 
 def _tokens(text: str) -> list[str]:
-    words = re.findall(r"[a-z0-9]+", (text or "").lower().replace("-", " "))
+    words = re.findall(r"[a-z0-9]+", str(text or "").lower().replace("-", " "))
     return [w[:-1] if len(w) > 4 and w.endswith("s") else w for w in words if w not in _STOP and len(w) > 2]
 
 
@@ -114,6 +114,7 @@ def match_faq(call_type: str | None, text: str) -> dict | None:
     """Find the FAQ the AI referred to: by 'FAQ <no>', exact/close question, or shared words."""
     import difflib
     faqs = faqs_for(call_type)
+    text = "" if text is None or (isinstance(text, float) and text != text) else str(text)
     if not faqs or not text or text.strip().lower() == NOT_IN_FAQ.lower():
         return None
     m = re.search(r"\b(?:faq\s*#?\s*)?(\d{1,3})\b", text.lower())
