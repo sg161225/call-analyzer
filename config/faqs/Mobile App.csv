@@ -2,7 +2,7 @@
 1,Can I do all work on mobile like desktop?,"BUSY Mobile App helps you bill on the go, share invoices instantly, check live stock & receivables, and receive faster payments. It reduces dependency on desktop, improves coordination between office & field staff, and gives you real‑time business control from mobile."
 2,Will invoice format be same as desktop?,"Yes, BUSY lets you use the same invoice format in mobile as configured in desktop; layout, logo, font, and fields are the same."
 3,Will invoice numbering remain same?,"Yes, BUSY supports same voucher/number series between desktop and mobile; numbers stay consistent and no duplicates are created."
-4,Can I use multiple companies in mobile app?,"Yes, BUSY Mobile App allows multiple companies on the same device; you can switch between companies with the company‑switch option."
+4,Can I use multiple companies in mobile app?,"Yes, BUSY Mobile App allows multiple companies, each with its own financial years. To add one: tap the Company Name at the top > Add Company > fill in the details > Proceed. You can switch between companies from the dropdown at the top."
 5,Can I use app if system is off?,"Yes, you can use the mobile app even when your desktop system is off. You can view synced data and do basic work on mobile. Once your desktop system is turned on and connected, all data will automatically sync between desktop and mobile."
 6,"If system is off full day, can I still do billing from mobile?","Yes, you can do billing in the mobile app. The app will generate temporary numbers while the desktop is off, and once your system is turned on, all data will sync automatically with correct voucher series."
 7,Can I create GST bills / E-way bills from mobile?,"Yes, BUSY Mobile App lets you create GST invoices and E‑Way Bill directly from mobile."
@@ -21,15 +21,15 @@
 20,Do I need separate backup for mobile?,"No, you do not need separate backup for mobile. Your data is stored and backed up from BUSY desktop (via BUSY Data folder and BUSYagent), and mobile only shows and syncs that same data. As long as you maintain desktop backup (local or on Google Drive), your mobile app data is safe and recoverable."
 21,Will desktop data reflect in mobile automatically?,"Yes, desktop data will reflect in mobile automatically once cloud sync is enabled and configured in BUSYagent. As long as auto‑sync is ON and both desktop and mobile have internet, any new voucher, ledger, or master created in desktop will appear in the mobile app within the set sync interval (usually every few minutes)."
 22,Do I need desktop approval for sync?,"No, sync is automatic if BUSYagent is configured; approvals apply to vouchers or user rights, not data sync itself."
-23,On how many devices can I use the app?,"You can use the BUSY Mobile App on one device at a time per user/license, but you are allowed to switch device up to 5 times (as per dealer‑set policy). If you want more than one active device, you typically need additional mobile app, each supporting one device."
-24,Can I switch devices?,"Yes, you can switch devices using the “Change Device” option in BUSY Mobile App, after logging in on the new phone and confirming with OTP."
+23,On how many devices can I use the app?,"Each mobile app license works on one device at a time, but you are allowed to switch device up to 5 times (as per dealer‑set policy). For more active devices you buy more licenses: ₹3,600 per device for 1-4 devices, ₹2,700 per device for 5 or more devices (per year, GST extra)."
+24,Can I switch devices?,Yes. On the new phone: download the BUSY Mobile App > enter the login credentials > Proceed Securely > the Change Device option appears > Proceed > the list of active devices appears; select the device to deactivate > enter the OTP received. The subscription moves to the new phone.
 25,How many times can I switch device in a year?,"You can switch devices up to 5 times in a year with one license; after that, you may need dealer support or a new activation as per policy."
 26,What if my mobile is lost or damaged?,"On a new mobile, download BUSY app again, log in with your BDEP ID and password, and use “Change Device” with OTP to move your subscription; all synced data will be restored."
 27,Can I login on another device in emergency?,"Yes, in emergency you can login on another device using the same BDEP ID and OTP, then switch activation there."
 28,Can multiple users use the app?,"Yes, multiple users (owner, accountant, salesman) can use BUSY Mobile App under the same or different user IDs with proper rights."
 29,Can I give access to salesman/accountant?,"Yes, you can create user IDs for salesman/accountant and give them limited rights for billing, viewing ledger, or reports as per your needs."
 30,Can I restrict user access (party-wise/feature-wise)?,"Yes, you can restrict users by feature (e.g., only view, no delete) and by party (e.g., specific customer groups) from User Configuration / User Rights in BUSY Desktop."
-31,What are the charges of mobile app?,Mobile App price is 3600 for 360 Days
+31,What are the charges of mobile app?,"₹3,600 per device per year (360 days) for 1-4 devices, and ₹2,700 per device per year for 5 or more devices. GST is extra."
 32,Is GST included in price?,"No, GST is added separately on the mobile app subscription amount."
 33,What is total cost including GST?,"Total cost = mobile app subscription price + 18% GST (approx). For example, ₹3,600 + ₹648 GST ≈ ₹4,248."
 34,Any offer currently available?,"Yes, there is a bundle offer: if you renew your BUSY Desktop, you can get 25% off on BUSY Mobile App (₹3,600 → ₹2,700 + GST). You can claim this offer within 15 days of desktop renewal by purchasing or activating the mobile app during that period."
@@ -62,7 +62,7 @@
 61,Why should I take mobile app if I have desktop?,"Desktop is your main system; mobile gives you remote access, field billing, instant sharing, and real‑time control without being tied to office."
 62,Can I get demo before purchase?,"Yes, you can use BUSY 14‑day free trial and app demo mode; your dealer can also show you live demo before buying."
 63,Is app available on Play Store/App Store?,"Yes, BUSY Mobile App is available on Google Play Store and Apple App Store."
-64,How to install and start using app?,Download from Play/App Store → install → open BUSY Desktop → enable mobile app → note BDEP ID → log in in mobile using BDEP ID + credentials and sync data.
+64,How to install and start using app?,Download the BUSY Mobile App from Google Play or the App Store > tap the BUSY App icon and enter the company's BDEP ID details > Proceed Securely > enter the activation code received on your registered email ID / mobile number. The mobile app must first be configured in BUSY Desktop (Administration > Mobile App > Configure Mobile App).
 65,Will someone help in setup?,"Yes, your support team will help with setup, activation, and sync configuration."
 66,Is it one-time payment or subscription?,"It is subscription‑based (annual/renewal), not a one‑time purchase."
 67,Can I take short-term plan?,"No, there is no short team plan but you can try 14 days foc."
@@ -117,12 +117,12 @@
 116,Can I manage weight-based items (jewellery etc.)?,"Yes, BUSY supports weight‑based units (g, kg, etc.) and item‑wise valuation; you set these in desktop masters, and mobile will show weight and rate correctly in bills."
 117,What if data gets deleted accidentally?,"If you take regular backups (desktop + cloud), you can restore data from backup in desktop; mobile data is mainly synced from desktop, so restoring desktop will fix mobile data too."
 118,Can I access old data in mobile?,"Yes, once old vouchers and masters are uploaded/synced, you can view old invoices, ledgers, and stock reports on mobile; mobile can access years‑back data as long as it is synced."
-119,Can I send payment reminders from app?,"BUSY Mobile lets you view outstanding receivables and share invoices via WhatsApp/email; payment reminders are typically sent manually through these channels, not via an auto‑reminder system."
+119,Can I send payment reminders from app?,"Yes, you can send payment reminders to customers with overdue payments from the BUSY Mobile App, and share invoices, ledgers and bill receivables via WhatsApp, email or SMS."
 120,Can I use bulk SMS feature in mobile?,"Bulk SMS is configured and triggered from BUSY Desktop (via SMS gateway/API), but the mobile app can view and send individual document‑based SMS/WhatsApp"
 121,Can basic license users also use mobile app?,"Yes, basic‑license users can use BUSY Mobile"
 122,Can I block my employee from deleting any voucher?,"Yes, via user‑rights in desktop; you can restrict deletion permissions for employees so they can only view/edit vouchers, not delete them."
 123,Can I schedule automatic reminders for every overdue invoice?,"Yes, BUSY supports auto payment reminders via BUSY Agent (desktop‑based); it sends SMS/WhatsApp reminders on schedule, but this is set up in desktop, not in the mobile app itself."
-124,Can I change Financial Year in mobile app,"Yes,you can change the Financial Year (FY) in BUSY Mobile app"
+124,Can I change Financial Year in mobile app,Yes. Go to the More page > Settings > Change Financial Year > a list of financial years appears > select the year > Proceed.
 125,Can I adjust payment in mobile app,"yes, you can adjust payment in BUSY Mobile App"
 126,Why can’t I see the Payment option on my phone but my manager can?,This happens because your user‑rights are restricted in desktop
 127,can i check my all Ewaybill/ E-invoice reports in mobile app,"Yes, you can we Ewaybill/E-invoice reports in mobile app"
@@ -133,3 +133,21 @@
 132,Suppose there are 2 companies (company1 and company2) on a single serial number of Busy and have been uploaded on Mobile App. The customer wants that only company1 should be visible on first mobile and only company2 on second mobile. Is it possible?,"Yes, it is possible. Since both companies have different BDEP IDs, you can use the respective BDEP ID for each.
 
 Note: The mobile app licenses must belong to the same serial number only."
+133,How do I activate the BUSY Mobile App with the activation code?,After buying a Mobile App license you receive an activation code on your registered email ID and mobile number. Download the app > tap the BUSY App icon and enter the BDEP ID details for the company > Proceed Securely > the activation code screen appears > enter the activation code.
+134,How do I configure the mobile app in BUSY Desktop?,1) Administration menu > Mobile App. 2) Configure Mobile App. 3) Create the BDEP ID. 4) Save and Sync Data. 5) Create a Voucher Series for mobile transactions. 6) Create Mobile Users and set permissions. 7) Sync Data. 8) Configure BUSY Agent to enable automatic download and upload. Our support team can do this setup with you.
+135,What is a BDEP ID?,The BDEP ID is the unique ID you create in BUSY Desktop (Configure Mobile App) that securely links your company data to the mobile app. You enter it in the app to log in to that company.
+136,What is the price for 5 or more devices?,"₹2,700 per device per year (GST extra) when you take 5 or more devices, compared with ₹3,600 per device for 1-4 devices."
+137,Is there a discount for a 3-year (1080-day) plan?,Yes. Buy or renew the Mobile App for 1080 days and get a flat 20% discount.
+138,Can I tag salesmen in invoices and see salesman-wise reports?,"Yes (BUSY 21, release 12.1 or later). In BUSY Desktop, modify the cloud sync user and tag one or more salesmen for that mobile user. In the app: Add invoice > select party > Add salesman > save. Then use the filter icon in reports to see data for a selected salesman. If only one salesman is tagged to the user, he is tagged on invoices automatically."
+139,Can I take orders and create quotations from the app?,"Yes, you can take orders, create quotations and invoices anytime, anywhere from the app, and share them on WhatsApp, email or SMS."
+140,Can I create new parties and items from the mobile app?,"Yes, you can add a party or create an item from your phone instantly, and edit item and party details."
+141,Can I get low-stock alerts on mobile?,"Yes, you can set customizable low-stock alarms to get reorder alerts and prevent stockouts, and view item-wise stock and sales reports."
+142,Can I approve vouchers and masters from the app?,"Yes, you can approve financial transactions (vouchers) and master data changes from the mobile app."
+143,Can I record cheque / instrument details in receipts?,"Yes, you can create and view instrument details (such as cheque details) within receipts in the app."
+144,Can I capture customer payments in the field?,"Yes, field and sales teams can record receipts / capture payments and confirm them live in the app."
+145,Can I share ledgers and reports from the app?,"Yes, you can share invoices, ledgers, bill receivables, reports and more via WhatsApp, email or SMS."
+146,"Can I see sales, receivables and stock in real time?","Yes, owners get real-time insights on sales, receivables and stock from anywhere."
+147,Is the app available on iPhone?,"Yes, the BUSY Mobile App is available on both iOS (App Store) and Android (Google Play)."
+148,Can I see a demo before buying?,"Yes, you can open demo data inside the BUSY app to explore it (tutorial videos are available in Hindi and English), or book a free demo with us."
+149,Can a CA or accountant manage multiple clients from the app?,"Yes, CAs and accountants can handle multiple clients from mobile, generate GST-compliant invoices and vouchers, and share ledgers and reports via WhatsApp or email."
+150,Is the app faster for billing?,"Yes, the new BUSY Mobile App makes voucher creation up to 3X faster, and invoices can be shared at a click."

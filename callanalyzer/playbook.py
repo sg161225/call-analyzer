@@ -57,6 +57,58 @@ PLAYBOOKS: dict[str, list[dict]] = {
             "Manual time-consuming + error-prone hai",
             "Software se time bachega, kaam easy hoga"]},
     ],
+    "Mobile App": [
+        {"objection": "Too expensive / price is high", "responses": [
+            "Sir, ₹3,600 saal ka matlab roz ka ₹10 - ek chai se bhi kam. Office aaye bina billing, collection aur stock sab phone pe.",
+            "5 ya zyada devices pe ₹2,700 per device hai, aur 1080 days (3 saal) lene pe flat 20% discount milta hai.",
+            "Payment reminders se collection fast hoti hai - app apna kharcha khud nikaal leta hai."]},
+        {"objection": "Other billing apps are free", "responses": [
+            "Free apps alag data rakhte hain; BUSY App aapke BUSY Desktop ka hi data sync karta hai - double entry nahi.",
+            "GST invoice, E-Way Bill, E-Invoice, user permissions aur approvals - ye sab free apps mein nahi milta."]},
+        {"objection": "Don't need it - I sit at the shop / desktop is enough", "responses": [
+            "Ghar ya travel pe bhi sales, receivables aur stock real-time dekh sakte hain - 24x7 access.",
+            "Low-stock alarm, payment reminders aur vouchers approve karna phone se ho jata hai.",
+            "Salesman field mein order, quotation aur invoice bana ke turant share kar sakta hai."]},
+        {"objection": "Worried about data security", "responses": [
+            "Data aapke BUSY Desktop se BDEP ID ke through secure link hota hai; activation code aur OTP se hi login hota hai.",
+            "Har mobile user ko sirf wahi permission milti hai jo aap desktop se dete ho."]},
+        {"objection": "Internet / sync problems", "responses": [
+            "BUSY Agent configure karne pe auto download-upload hota hai - kuch seconds se minutes mein data sync.",
+            "Setup hamari support team aapke saath karegi aur ek test entry se sync check kar lenge."]},
+        {"objection": "Desktop has to stay on", "responses": [
+            "BUSY Agent set interval pe data apne aap sync karta hai; real-time ke liye desktop internet pe ho toh best rehta hai.",
+            "Already synced data app mein dekh sakte hain."]},
+        {"objection": "Setup looks complicated", "responses": [
+            "Sir, setup hamari team karegi: BDEP ID, voucher series, mobile users aur BUSY Agent - sab 10-15 minute mein.",
+            "Activation code aapke registered email/mobile pe aata hai - app mein daalte hi start."]},
+        {"objection": "Not tech-savvy / staff can't use the app", "responses": [
+            "App bahut simple hai - voucher 3X fast banta hai, party aur item ek click mein.",
+            "Hindi aur English tutorial videos hain, aur app mein demo data se pehle practice kar sakte hain.",
+            "Staff ko sirf zaroori rights denge, galti ka chance kam."]},
+        {"objection": "Worried salesmen / staff will misuse it", "responses": [
+            "Har user ke liye permission aap set karte ho; vouchers aur masters aapke approval ke baad hi final hote hain.",
+            "Salesman tagging se salesman-wise report filter karke unka poora kaam dekh sakte hain."]},
+        {"objection": "Needs many users - cost adds up", "responses": [
+            "5 ya zyada devices pe rate ₹3,600 se ₹2,700 per device ho jata hai.",
+            "Shuru mein zaroori users ke liye lijiye, baad mein devices badha sakte hain."]},
+        {"objection": "What if I change or lose my phone?", "responses": [
+            "Naye phone pe login karke Change Device option se OTP daaliye - subscription transfer ho jata hai.",
+            "Data desktop/sync mein rehta hai, phone kho jaane se data nahi jaata."]},
+        {"objection": "Uses an iPhone", "responses": [
+            "BUSY App iOS (App Store) aur Android (Google Play) dono pe available hai."]},
+        {"objection": "Wants to try it before buying", "responses": [
+            "App mein demo data se abhi explore kar sakte hain - main saath mein dikha deta hoon.",
+            "Free demo book kar dete hain, kab ka time theek rahega?"]},
+        {"objection": "Already shares bills on WhatsApp manually", "responses": [
+            "App se invoice, ledger, bill receivables aur reports ek click mein WhatsApp/email/SMS pe share hote hain - photo ya PDF banane ki zaroorat nahi.",
+            "Overdue customers ko payment reminder bhi seedha app se jata hai."]},
+        {"objection": "Will buy later / needs time to decide", "responses": [
+            "Desktop renewal ke 15 din ke andar lene pe Mobile App pe 25% off milta hai - ye offer abhi valid hai.",
+            "Kya confusion hai bataiye, abhi clear kar deta hoon. Kab follow-up karun?"]},
+        {"objection": "Needs to discuss with CA / partner", "responses": [
+            "CA ke liye bhi useful hai - ledger aur reports seedha WhatsApp/email pe share ho jaate hain.",
+            "Partner/CA ke saath ek quick demo call arrange kar deta hoon."]},
+    ],
     "CLM Onboarding": [
         {"objection": "Why do you need another number?", "responses": [
             "Secure the customer's account with a recovery contact independent of the activation credentials."]},
@@ -185,6 +237,24 @@ KEYWORDS: dict[str, list[tuple[tuple[str, ...], str]]] = {
         (("no benefit", "not useful", "demo not", "didn't like demo"), "Didn't find benefit in demo"),
         (("sales discussion", "salesperson", "not clear", "clarity"), "Sales discussion could be better"),
         (("time to decide", "think", "decide later", "will let you know", "later"), "Needs time to decide"),
+    ],
+    "Mobile App": [
+        (("iphone", "ios", "apple"), "Uses an iPhone"),
+        (("lose my phone", "lost", "change phone", "change device", "new phone", "phone kharab", "damaged"), "What if I change or lose my phone?"),
+        (("misuse", "salesman", "trust staff", "control", "approval"), "Worried salesmen / staff will misuse it"),
+        (("free app", "free apps", "vyapar", "mybillbook", "khatabook", "other app"), "Other billing apps are free"),
+        (("many users", "devices", "more users", "per device", "each user"), "Needs many users - cost adds up"),
+        (("expensive", "costly", "price", "afford", "budget", "mehenga", "discount"), "Too expensive / price is high"),
+        (("security", "secure", "data safe", "leak", "hack"), "Worried about data security"),
+        (("desktop on", "computer on", "system on", "keep on"), "Desktop has to stay on"),
+        (("internet", "sync", "network", "slow"), "Internet / sync problems"),
+        (("setup", "configure", "complicated", "install"), "Setup looks complicated"),
+        (("tech", "difficult", "can't use", "don't know how", "staff can't", "learn"), "Not tech-savvy / staff can't use the app"),
+        (("try", "demo", "trial"), "Wants to try it before buying"),
+        (("whatsapp", "manually", "photo", "pdf"), "Already shares bills on WhatsApp manually"),
+        (("ca", "accountant", "partner", "family", "discuss"), "Needs to discuss with CA / partner"),
+        (("don't need", "no need", "desktop is enough", "at the shop", "sit at"), "Don't need it - I sit at the shop / desktop is enough"),
+        (("later", "think", "decide", "time"), "Will buy later / needs time to decide"),
     ],
     "CLM Onboarding": [
         (("ca number", "ca's number", "accountant's number", "accountant number", "ca contact", "why ca"), "Why do you want my CA/Accountant's number?"),
