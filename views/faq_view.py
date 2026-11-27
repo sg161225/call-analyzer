@@ -28,13 +28,18 @@ def render(view: pd.DataFrame, ctype: str) -> None:
     m[3].metric("Not answered", int((d["accuracy"] == "Not answered").sum()), border=True)
 
     d["Topic"] = d.apply(lambda a: f"{a['faq_no']}. {a['faq_question']}" if a["faq_no"] else "Not in FAQ", axis=1)
-    top = d["Topic"].value_counts().head(12)
-    cnt = d[d["Topic"].isin(top.index)].groupby(["Topic", "accuracy"]).size().reset_index(name="Times")
-    st.markdown("**Most asked questions and how they were answered**")
+    issues = d[d["accuracy"] != "Correct"]
+    if issues.empty:
+        st.success("✅ Every product question in these calls was answered correctly.")
+        return
+    top = issues["Topic"].value_counts().head(12)
+    cnt = issues[issues["Topic"].isin(top.index)].groupby(["Topic", "accuracy"]).size().reset_index(name="Times")
+    st.markdown("**Questions not answered properly** (only questions where an executive went wrong; "
+                f"{(d['accuracy'] == 'Correct').sum()} correct answers not shown)")
     bars = alt.Chart(cnt).mark_bar(stroke="white", strokeWidth=2).encode(
         y=alt.Y("Topic:N", sort=top.index.tolist(), title=None, axis=alt.Axis(labelLimit=380)),
-        x=alt.X("Times:Q", title="Times asked", axis=alt.Axis(tickMinStep=1)),
-        color=alt.Color("accuracy:N", title=None, scale=alt.Scale(domain=ORDER, range=[GOOD, WARN, BAD, NA]),
+        x=alt.X("Times:Q", title="Times not answered properly", axis=alt.Axis(tickMinStep=1)),
+        color=alt.Color("accuracy:N", title=None, scale=alt.Scale(domain=ORDER[1:], range=[WARN, BAD, NA]),
                         legend=alt.Legend(orient="top")),
         order=alt.Order("o:Q"), tooltip=["Topic", alt.Tooltip("accuracy:N", title="Answer"), "Times"],
     ).transform_calculate(o="indexof(['Correct','Partly correct','Wrong','Not answered'], datum.accuracy)")

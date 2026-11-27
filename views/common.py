@@ -104,7 +104,8 @@ def _faq_score(answers: list) -> float | None:
 
 def faq_summary(answers: list) -> str:
     mark = {"Correct": "✅", "Partly correct": "🟡", "Wrong": "❌", "Not answered": "➖"}
-    return "; ".join(f"{mark.get(a.get('accuracy'), '')} {a.get('customer_question')}" for a in answers or [])
+    return "; ".join(f"{mark.get(a.get('accuracy'), '')} {a.get('customer_question')}" for a in answers or []
+                     if a.get("accuracy") != "Correct")
 
 
 def fatal_summary(errs: list) -> str:
@@ -114,7 +115,8 @@ def fatal_summary(errs: list) -> str:
 
 def objections_summary(objs: list) -> str:
     mark = {"Yes": "✅", "Partly": "🟡", "No": "❌"}
-    return "; ".join(f"{mark.get(o.get('playbook_followed'), '')} {o.get('objection')}" for o in objs or [])
+    return "; ".join(f"{mark.get(o.get('playbook_followed'), '')} {o.get('objection')}" for o in objs or []
+                     if o.get("playbook_followed") != "Yes")
 
 
 def _flag(v) -> bool:
@@ -184,8 +186,8 @@ def export_frame(flat: pd.DataFrame) -> pd.DataFrame:
             "Next step": flat["Next step"], "Next step date": flat["Next step date"].dt.strftime("%Y-%m-%d").fillna(""),
             "Deal value (₹)": flat["Deal value"], "Loss reason": flat["Loss reason"].replace("None", ""),
             "Risk": flat["Risk"].replace("None", ""), "Checklist": flat["Checklist"].map(checklist_summary),
-            "Objections (playbook)": flat["Objections"].map(objections_summary),
-            "Product questions (FAQ)": flat["FAQ answers"].map(faq_summary),
+            "Objections not handled (playbook)": flat["Objections"].map(objections_summary),
+            "Product questions not answered properly (FAQ)": flat["FAQ answers"].map(faq_summary),
             "FATAL": flat["Fatal"].map({True: "FATAL", False: "", None: ""}),
             "Fatal errors": flat["Fatal errors"].map(fatal_summary),
             "Empathy": flat["Empathy"].fillna(""), "Humility & courtesy": flat["Humility"].fillna(""),

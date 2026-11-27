@@ -270,8 +270,14 @@ def _detailed(r, rv):
                 continue
             with st.expander(f"{ICON.get(a.get('rating'), '')} **{label}** · {a.get('rating')}", expanded=key == "business_probing"):
                 if key == "customer_queries":
-                    for q in a.get("queries", []):
-                        st.markdown(f"- {q}" + (" ❗ *unresolved*" if q in a.get("unresolved", []) else ""))
+                    unresolved = a.get("unresolved") or []
+                    n_all = len(a.get("queries") or [])
+                    if unresolved:
+                        st.markdown(f"**Not resolved on the call** ({len(unresolved)} of {max(n_all, len(unresolved))}):")
+                        for q in unresolved:
+                            st.markdown(f"- ❗ {q}")
+                    else:
+                        st.markdown(f"✅ All {n_all} customer queries were handled." if n_all else "No customer queries.")
                     continue
                 if key == "pitch":
                     st.markdown(f"*Features:* {', '.join(a.get('features_mentioned') or []) or 'none'}  \n"
@@ -295,24 +301,34 @@ def _detailed(r, rv):
                     c = given.get(it, {})
                     st.markdown(f"{ICON.get(c.get('done'), '➖')} {esc(it)} <span style='opacity:.65;font-size:.88em'>· {esc(c.get('evidence', 'not checked'))}</span>",
                                 unsafe_allow_html=True)
+        bad_obj = [o for o in r["Objections"] if o.get("playbook_followed") != "Yes"]
         if r["Objections"]:
             with st.container(border=True):
-                pct = r["Playbook %"]
-                st.markdown("**🛡️ Objections vs playbook**" + (f" · {pct:.0%} handled the playbook way" if pct is not None else ""))
+                good = len(r["Objections"]) - len(bad_obj)
+                st.markdown(f"**🛡️ Objections not handled properly** · {len(bad_obj)} of {len(r['Objections'])}"
+                            + (f" <span style='opacity:.7'>({good} handled the playbook way)</span>" if good else ""),
+                            unsafe_allow_html=True)
+                if not bad_obj:
+                    st.markdown("✅ Every objection was handled the playbook way.")
                 mark = {"Yes": "✅ Followed", "Partly": "🟡 Partly", "No": "❌ Not followed"}
-                for o in r["Objections"]:
+                for o in bad_obj:
                     st.markdown(f"**{esc(o['objection'])}** · {mark.get(o['playbook_followed'], '')}  \n"
                                 f"<span style='opacity:.75'>Customer: “{esc(o.get('customer_said'))}” · Executive: “{esc(o.get('executive_response'))}”</span>",
                                 unsafe_allow_html=True)
                     if o["playbook_followed"] != "Yes" and o.get("recommended_response"):
                         st.markdown(f"💬 *Should say:* {o['recommended_response']}")
+        bad_faq = [a for a in r["FAQ answers"] if a.get("accuracy") != "Correct"]
         if r["FAQ answers"]:
             with st.container(border=True):
-                pct = r["FAQ %"]
-                st.markdown("**❓ Product questions vs FAQ**" + (f" · {pct:.0%} answered correctly" if pct is not None else ""))
+                good = len(r["FAQ answers"]) - len(bad_faq)
+                st.markdown(f"**❓ Product questions not answered properly** · {len(bad_faq)} of {len(r['FAQ answers'])}"
+                            + (f" <span style='opacity:.7'>({good} answered correctly)</span>" if good else ""),
+                            unsafe_allow_html=True)
+                if not bad_faq:
+                    st.markdown("✅ Every product question was answered correctly.")
                 mark = {"Correct": "✅ Correct", "Partly correct": "🟡 Partly correct", "Wrong": "❌ Wrong",
                         "Not answered": "➖ Not answered"}
-                for a in r["FAQ answers"]:
+                for a in bad_faq:
                     st.markdown(f"**{esc(a['customer_question'])}** · {mark.get(a['accuracy'], '')}  \n"
                                 f"<span style='opacity:.75'>Executive said: “{esc(a.get('executive_answer'))}”</span>",
                                 unsafe_allow_html=True)

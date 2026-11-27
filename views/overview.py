@@ -261,22 +261,27 @@ if ctype in PLAYBOOKS:
         m[3].metric("Success when not followed", "—" if notf.empty else f"{notf['Success'].mean():.0%}",
                     help=f"{len(notf)} objections", border=True)
 
-        st.markdown("**Most common objections and how they were handled**")
-        cnt = od.groupby(["Objection", "Followed"]).size().reset_index(name="Times")
+        bad = od[od["Followed"] != "Yes"]
+        if bad.empty:
+            st.success("✅ Every objection in these calls was handled the playbook way.")
+        st.markdown("**Objections not handled properly** (playbook not followed or only partly; "
+                    f"{(od['Followed'] == 'Yes').sum()} handled well not shown)")
+        cnt = bad.groupby(["Objection", "Followed"]).size().reset_index(name="Times")
         cnt["Handled"] = cnt["Followed"].map({"Yes": "Followed", "Partly": "Partly", "No": "Not followed"})
-        order = od["Objection"].value_counts().index.tolist()
-        tot = od["Objection"].value_counts().rename_axis("Objection").reset_index(name="Total")
+        order = bad["Objection"].value_counts().index.tolist()
+        tot = bad["Objection"].value_counts().rename_axis("Objection").reset_index(name="Total")
         bars = alt.Chart(cnt).mark_bar(stroke="white", strokeWidth=2).encode(
             y=alt.Y("Objection:N", sort=order, title=None, axis=alt.Axis(labelLimit=320)),
-            x=alt.X("Times:Q", title="Times raised", axis=alt.Axis(tickMinStep=1)),
-            color=alt.Color("Handled:N", scale=alt.Scale(domain=["Followed", "Partly", "Not followed"],
-                                                         range=["#0ca30c", "#fab219", "#d03b3b"]),
+            x=alt.X("Times:Q", title="Times not handled properly", axis=alt.Axis(tickMinStep=1)),
+            color=alt.Color("Handled:N", scale=alt.Scale(domain=["Partly", "Not followed"],
+                                                         range=["#fab219", "#d03b3b"]),
                             legend=alt.Legend(orient="top", title=None)),
             order=alt.Order("o:Q"), tooltip=["Objection", "Handled", "Times"],
         ).transform_calculate(o="indexof(['Followed','Partly','Not followed'], datum.Handled)")
         labels = alt.Chart(tot).mark_text(align="left", dx=4).encode(
             y=alt.Y("Objection:N", sort=order), x="Total:Q", text="Total:Q", color=alt.value("#52514e"))
-        st.altair_chart((bars + labels).properties(height=34 * len(order) + 40), width="stretch")
+        if not bad.empty:
+            st.altair_chart((bars + labels).properties(height=max(120, 34 * len(order) + 40)), width="stretch")
 
         c1, c2 = st.container(), st.container()
         with c1:
@@ -288,6 +293,7 @@ if ctype in PLAYBOOKS:
                 "Success if followed": g.apply(lambda d: d.loc[d["Followed"] == "Yes", "Success"].mean() * 100, include_groups=False).round(),
                 "Success if not": g.apply(lambda d: d.loc[d["Followed"] != "Yes", "Success"].mean() * 100, include_groups=False).round(),
             }).sort_values("Raised", ascending=False).reset_index()
+            tab = tab[tab["Followed"] < 100]  # only objections not always handled the playbook way
             st.dataframe(tab, hide_index=True, width="stretch", column_config={
                 "Followed": st.column_config.ProgressColumn("Playbook followed", min_value=0, max_value=100, format="%d%%"),
                 "Success if followed": st.column_config.NumberColumn(format="%d%%"),
