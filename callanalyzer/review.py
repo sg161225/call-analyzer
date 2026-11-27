@@ -566,8 +566,13 @@ def classify_call(transcript: str, settings: dict) -> str | None:
     system = ("Classify this sales/service phone call of an Indian accounting-software company into exactly one "
               f"call type:\n{types}\nReply with JSON only: {{\"call_type\": \"<one of the names above>\"}}")
     try:
-        raw = _groq_chat(system, transcript[:4000], {**settings, "analysis": {**settings["analysis"], "effort": "low"}},
-                         json_mode=True)
+        import groq
+        client = groq.Groq()
+        main = _groq_models(settings, client)
+        # A small job: use models outside the review chain first, so it doesn't eat the reviews' daily allowance.
+        others = [m for m in (_available_models(client) or []) if m not in main[:2]]
+        raw = _groq_chat(system, transcript[:3000], {**settings, "analysis": {**settings["analysis"], "effort": "low"}},
+                         json_mode=True, max_out=600, what="detect the call type", models=(others + main)[:4])
         t = json.loads(raw).get("call_type")
     except Exception:
         return None

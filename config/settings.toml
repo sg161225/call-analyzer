@@ -41,8 +41,10 @@ groq_model = "openai/gpt-oss-120b"
 groq_fallback_models = ["openai/gpt-oss-20b"]
 # Anthropic model (used only when provider = "anthropic")
 model = "claude-opus-5-5"
-# low | medium | high: higher = more thorough, slower (and costlier on paid providers)
-effort = "medium"
+# low | medium | high: how much the AI "thinks" before answering. Its thinking counts towards Groq's free daily
+# token limit, so "low" fits noticeably more calls per day. Use "medium" for more thorough reviews when you
+# review only a few calls a day.
+effort = "low"
 
 [storage]
 # Keep each call's recording (compressed MP3, ~1 MB per 4 minutes) and its timed transcript, so they can be
