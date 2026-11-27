@@ -226,11 +226,14 @@ def _err_text(e) -> str:
         msg = (body.get("error") or {}).get("message") or str(e)
     except Exception:
         msg = str(e)
-    return " ".join(str(msg).split())[:160]
+    import re
+    msg = re.sub(r"\s*in organization \S+ service tier \S+", "", " ".join(str(msg).split()))
+    msg = re.sub(r"\s*(Need more tokens\?|Visit https?://\S+).*$", "", msg)
+    return msg[:260]
 
 
 def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tuple[str, str] | None = None,
-               on_wait=None) -> str:
+               on_wait=None, max_out: int = 8000, what: str = "review this call") -> str:
     """Call Groq. Per model: try the full request; if it's too big, try the lighter one (if given); if a
     per-minute limit is hit, wait as long as Groq asks (up to ~1 minute) and try again. Then move on to
     the next available model. The error lists Groq's own reason for every model tried."""
@@ -241,7 +244,7 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
     client = groq.Groq()
     problems = []
     for model in _groq_models(settings, client):
-        attempts = [("full", system, user, 8000)] + ([("lighter", lite[0], lite[1], 4500)] if lite else [])
+        attempts = [("full", system, user, max_out)] + ([("lighter", lite[0], lite[1], min(max_out, 4500))] if lite else [])
         i, waited = 0, False
         while i < len(attempts):
             label, sys_msg, user_msg, max_out = attempts[i]
@@ -278,9 +281,10 @@ def _groq_chat(system: str, user: str, settings: dict, json_mode: bool, lite: tu
                     problems.append(f"{model}: {_err_text(e)}")
                     break
                 raise
-    raise RuntimeError("Groq couldn't review this call on the free tier. " + " | ".join(problems)
-                       + ". You can retry it later from the failed-calls list (🔁 Retry); limits reset every "
-                       "minute and every day.")
+    hint = (" You can retry it later from the failed-calls list (🔁 Retry)." if what == "review this call"
+            else " Try again in a minute, or with fewer calls selected.")
+    raise RuntimeError(f"Groq couldn't {what} on the free tier: " + " | ".join(problems) + "." + hint
+                       + " Free-tier limits reset every minute and every day.")
 
 
 def _compact_schema() -> str:
@@ -622,56 +626,6 @@ Markdown with these sections:
 Only use evidence present in the data. Mention sample size, and do not overstate patterns seen in 1-2 calls."""
 
 
-GROQ_MAX_CALLS = 20  # keeps one report inside the free tier's per-request token limit
-
-
-def compact(row: dict) -> dict:
-    """Shorter version of a review for the free tier."""
-    cut = lambda t, n=160: (t or "")[:n]
-    out = {k: row.get(k) for k in ("executive", "date", "campaign", "pitch_version", "call_type", "call_purpose",
-                                   "outcome", "loss_reason", "deal_value_inr", "risk_level", "overall_score",
-                                   "customer_sentiment_start", "customer_sentiment_end")}
-    out["checklist_missed"] = [c["item"][:60] for c in row.get("checklist") or [] if c.get("done") == "No"][:5]
-    out["objections"] = [f"{o.get('objection')}: playbook {o.get('playbook_followed')}" for o in row.get("objections") or []][:5]
-    out["product_questions"] = [f"{a.get('faq_question') or a.get('customer_question')}: {a.get('accuracy')}"
-                                for a in row.get("faq_answers") or []][:5]
-    ss = row.get("soft_skills") or {}
-    out["soft_skills"] = {k: (ss.get(k) or {}).get("rating") for k in ("empathy", "humility", "fluency")}
-    out["fatal_errors"] = [f.get("category") for f in row.get("fatal_errors") or []]
-    for k in ("business_probing", "need_generation", "objection_handling"):
-        a = row.get(k) or {}
-        out[k] = {"rating": a.get("rating"), "observed": cut(a.get("observed"))}
-    p = row.get("pitch") or {}
-    out["pitch"] = {"rating": p.get("rating"), "features": p.get("features_mentioned", [])[:5], "offers": p.get("offers_made", [])}
-    q = row.get("customer_queries") or {}
-    out["queries"] = [cut(x, 90) for x in q.get("queries", [])[:5]]
-    out["unresolved"] = [cut(x, 90) for x in q.get("unresolved", [])[:3]]
-    out["improvements"] = [cut(x, 120) for x in row.get("acpt_improvement", [])[:3]]
-    return out
-
-
-def insights_report(rows: list[dict], settings: dict, focus: str = "") -> str:
-    company = settings["company"]
-    groq_mode = _provider(settings) == "groq"
-    if groq_mode:
-        rows = [compact(r) for r in rows[:GROQ_MAX_CALLS]]
-    payload = json.dumps(rows, ensure_ascii=False)
-    user = f"Company: {company['name']}: {company['product']}\n"
-    if focus:
-        user += f"Manager's focus for this report: {focus}\n"
-    user += f"\n{len(rows)} call reviews:\n<reviews>\n{payload}\n</reviews>"
-    if groq_mode:
-        return _groq_chat(INSIGHTS_SYSTEM, user, settings, json_mode=False)
-    with _client().beta.messages.stream(
-        model=settings["analysis"]["model"],
-        max_tokens=32000,
-        system=INSIGHTS_SYSTEM,
-        messages=[{"role": "user", "content": user}],
-        output_config={"effort": "high"},
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-    ) as stream:
-        msg = stream.get_final_message()
-    if msg.stop_reason == "refusal":
-        raise RuntimeError("The AI declined to write this report.")
-    return "".join(b.text for b in msg.content if b.type == "text")
+def insights_report(rows: list[dict], settings: dict, focus: str = "", progress=None) -> str:
+    from .insights import build_report
+    return build_report(rows, settings, focus, progress)
