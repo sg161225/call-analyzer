@@ -3,7 +3,7 @@ import streamlit as st
 
 from views.common import load_flat
 from callanalyzer.calltypes import CALL_TYPES
-from callanalyzer.faq import FAQ_DIR, faqs_for
+from callanalyzer.faq import FAQ_DIR, faqs_for, is_active
 from callanalyzer.playbook import OTHER, PLAYBOOKS
 
 st.title("📖 Playbook")
@@ -94,6 +94,9 @@ if faqs:
             if f["no"] in asked:
                 n, rate = asked[f["no"]]
                 tag = f"  ·  ❌ not answered properly {badf.get(f['no'], 0)} of {n}" if badf.get(f["no"]) else f"  ·  ✅ asked {n}×, always correct"
+            if f.get("till"):
+                tag += (f"  ·  ⏳ offer valid till {f['till']:%d %b %Y}" if is_active(f)
+                        else f"  ·  ⌛ offer ended {f['till']:%d %b %Y} (not checked on newer calls)")
             with st.expander(f"**{f['no']}.** {f['q']}{tag}"):
                 st.markdown(f["a"])
         path = FAQ_DIR / f"{ctype}.csv"

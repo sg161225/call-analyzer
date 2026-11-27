@@ -7,7 +7,7 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 
 from .calltypes import CALL_TYPES, CHECKLISTS, LOSS_REASONS, OUTCOMES, RISK_LEVELS, canonical_type, checklist_prompt
-from .faq import ACCURACY, NOT_IN_FAQ, faq_prompt, faqs_for, match_faq, relevant_faqs
+from .faq import ACCURACY, NOT_IN_FAQ, faq_prompt, faqs_for, match_faq, parse_date, relevant_faqs
 from .quality import match_fatal, quality_prompt
 from .playbook import OTHER, PLAYBOOKS, objection_names, playbook_prompt, responses_for
 
@@ -562,7 +562,7 @@ def _review_call(transcript: str, meta: dict, settings: dict) -> dict:
               + playbook_prompt(forced))
 
     def build(text: str, faq_k: int, note: str = "") -> tuple[str, str]:
-        faqs = relevant_faqs(forced, text, k=faq_k) if forced else []
+        faqs = relevant_faqs(forced, text, k=faq_k, on=parse_date(meta.get("call_date"))) if forced else []
         if faqs:
             faq = ("below are the company's official answers to product questions likely raised in this call. For EVERY "
                    "product question the customer asked, give faq_no (0 if none of these covers it), the executive's "

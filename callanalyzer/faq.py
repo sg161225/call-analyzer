@@ -1,4 +1,7 @@
-"""Product FAQs per call type (config/faqs/<call type>.csv: No, Question, Answer).
+"""Product FAQs per call type (config/faqs/<call type>.csv: No, Question, Answer, optional Valid till).
+
+"Valid till" is for time-limited offers (e.g. 30 Nov 2026 or 2026-11-30): after that date the FAQ is no longer
+used to check calls, so executives aren't marked wrong for not quoting an expired offer.
 
 For each call, only the FAQs that match what was discussed are sent to the AI (all of them would be
 too big for the free tier). The AI then checks the executive's answers against them.
@@ -9,6 +12,7 @@ import csv
 import math
 import re
 from collections import Counter
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,8 +39,24 @@ def _load(call_type: str, mtime: float) -> tuple:
     path = FAQ_DIR / f"{call_type}.csv"
     with open(path, encoding="utf-8-sig", newline="") as f:
         rows = [{"no": int(r.get("No") or i + 1), "q": (r.get("Question") or "").strip(),
-                 "a": (r.get("Answer") or "").strip()} for i, r in enumerate(csv.DictReader(f))]
+                 "a": (r.get("Answer") or "").strip(), "till": parse_date(r.get("Valid till"))}
+                for i, r in enumerate(csv.DictReader(f))]
     return tuple(r for r in rows if r["q"])
+
+
+def parse_date(text) -> date | None:
+    text = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", str(text or "").strip().replace(",", " "))
+    text = " ".join(text.split())
+    for fmt in ("%Y-%m-%d", "%d %b %Y", "%d %B %Y", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d-%b-%Y", "%d-%b-%y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def is_active(f: dict, on: date | None = None) -> bool:
+    return not f.get("till") or (on or date.today()) <= f["till"]
 
 
 def faqs_for(call_type: str | None) -> list[dict]:
@@ -50,10 +70,11 @@ def has_faqs(call_type: str | None) -> bool:
     return bool(faqs_for(call_type))
 
 
-def relevant_faqs(call_type: str | None, transcript: str, k: int = 12) -> list[dict]:
+def relevant_faqs(call_type: str | None, transcript: str, k: int = 12, on: date | None = None) -> list[dict]:
     """Up to k FAQs that match the call. Each line of the call first gets its best-matching FAQ
-    (so every question asked is covered), then the rest is filled by the best match overall."""
-    faqs = faqs_for(call_type)
+    (so every question asked is covered), then the rest is filled by the best match overall.
+    Offers that had ended by the call date (`on`, default today) are left out."""
+    faqs = [f for f in faqs_for(call_type) if is_active(f, on)]
     if not faqs:
         return []
     docs = [Counter(_tokens(f["q"]) * 3 + _tokens(f["a"])) for f in faqs]   # question words count more
@@ -85,7 +106,8 @@ def relevant_faqs(call_type: str | None, transcript: str, k: int = 12) -> list[d
 
 
 def faq_prompt(faqs: list[dict]) -> str:
-    return "\n".join(f"FAQ {f['no']}. Q: {f['q']}\n   A: {f['a']}" for f in faqs)
+    return "\n".join(f"FAQ {f['no']}. Q: {f['q']}\n   A: {f['a']}"
+                     + (f" (time-limited offer, valid till {f['till']:%d %b %Y})" if f.get("till") else "") for f in faqs)
 
 
 def match_faq(call_type: str | None, text: str) -> dict | None:

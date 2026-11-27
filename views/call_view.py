@@ -51,6 +51,7 @@ def render(r: pd.Series, rv: dict, raw: pd.Series, nav_ids: list[int]) -> None:
         st.session_state.update(cv_call=r["id"], cv_seek=0, cv_autoplay=False)
 
     _header(r, rv, nav_ids)
+    _pdf_button(r, rv)
     mode = st.segmented_control("View", VIEWS, key="cv_mode", default=VIEWS[0], label_visibility="collapsed") or VIEWS[0]
     if r["Fatal"]:
         _fatal_banner(r)
@@ -60,6 +61,104 @@ def render(r: pd.Series, rv: dict, raw: pd.Series, nav_ids: list[int]) -> None:
         _detailed(r, rv)
     else:
         _recording(r, rv, segments, stats)
+
+
+# ---- PDF of the review -----------------------------------------------------------------------
+def _cell(x) -> str:
+    return " ".join(str(x or "").split()).replace("|", "/")
+
+
+def call_markdown(r, rv) -> str:
+    """The call review as Markdown for the PDF: scorecard plus only what wasn't handled properly."""
+    out = []
+    if rv.get("one_line_summary"):
+        out += ["## Summary", rv["one_line_summary"], ""]
+    if r["Fatal"]:
+        out += ["## ⛔ Fatal call: the executive made a blunder"]
+        out += [f"- **{(mmss(e.get('time_sec')) + ' · ') if e.get('time_sec') else ''}"
+                f"{SHORT_FATAL.get(e['category'], e['category'])}**: “{_cell(e.get('evidence'))}”" for e in r["Fatal errors"]]
+        out.append("")
+    out += ["## Scorecard", "| Area | Rating | Observed | Improve |", "|---|---|---|---|"]
+    for key, label in PARAMETERS.items():
+        a = rv.get(key)
+        if key == "acpt_improvement" or not a:
+            continue
+        observed = a.get("observed", "")
+        if key == "customer_queries":
+            un = a.get("unresolved") or []
+            observed = ("Not resolved: " + "; ".join(un)) if un else "All customer queries handled."
+        out.append(f"| {label} | {a.get('rating', '')} | {_cell(observed)} | {_cell(a.get('improvement'))} |")
+    out.append("")
+    tips = rv.get("acpt_improvement") or []
+    if tips:
+        out += ["## ACPT improvement required"] + [f"{i}. {t}" for i, t in enumerate(tips, 1)] + [""]
+    done = [c for c in r["Checklist"] or [] if c.get("done") in ("Yes", "No")]
+    missed = [c for c in done if c["done"] == "No"]
+    if done:
+        out.append(f"## Checklist points missed · {len(missed)} of {len(done)}")
+        out += [f"- **{c['item']}**" + (f": {_cell(c.get('evidence'))}" if c.get("evidence") else "") for c in missed] \
+            or ["- ✓ Every checklist point was covered."]
+        out.append("")
+    if r["Objections"]:
+        bad = [o for o in r["Objections"] if o.get("playbook_followed") != "Yes"]
+        out.append(f"## Objections not handled properly · {len(bad)} of {len(r['Objections'])}")
+        if not bad:
+            out.append("✓ Every objection was handled the playbook way.")
+        for o in bad:
+            out += [f"### {o['objection']} ({'Partly' if o['playbook_followed'] == 'Partly' else 'Not followed'})",
+                    f"Customer: “{_cell(o.get('customer_said'))}”  ", f"Executive: “{_cell(o.get('executive_response'))}”"]
+            if o.get("recommended_response"):
+                out.append(f"\n**Should say:** {_cell(o['recommended_response'])}")
+            out.append("")
+    if r["FAQ answers"]:
+        bad = [a for a in r["FAQ answers"] if a.get("accuracy") != "Correct"]
+        out.append(f"## Product questions not answered properly · {len(bad)} of {len(r['FAQ answers'])}")
+        if not bad:
+            out.append("✓ Every product question was answered correctly.")
+        for a in bad:
+            out += [f"### {_cell(a['customer_question'])} ({a['accuracy']})",
+                    f"Executive said: “{_cell(a.get('executive_answer'))}”"]
+            if a.get("faq_no"):
+                out.append(f"\n**Correct answer (FAQ {a['faq_no']}):** {_cell(a.get('faq_answer'))}")
+            out.append("")
+    ss = rv.get("soft_skills") or {}
+    if ss:
+        out += ["## Soft skills", "| Skill | Rating | Evidence |", "|---|---|---|"]
+        out += [f"| {SOFT_SKILLS[k][0]} | {(ss.get(k) or {}).get('rating', '')} | {_cell((ss.get(k) or {}).get('evidence'))} |"
+                for k in ("empathy", "humility", "fluency") if ss.get(k)]
+        out.append("")
+    out += ["## Outcome & next step", f"- Outcome: **{r['Outcome']}**" + (f": {_cell(rv.get('outcome_note'))}" if rv.get("outcome_note") else "")]
+    if r["Next step"]:
+        out.append(f"- Next step: **{r['Next step']}**" + (f" (due {r['Next step date']:%d %b %Y})" if pd.notna(r["Next step date"]) else ""))
+    if r["Deal value"]:
+        out.append(f"- Deal value: **₹{int(r['Deal value']):,}** {r['Deal note']}")
+    if r["Loss reason"] not in ("None", ""):
+        out.append(f"- Loss reason: {r['Loss reason']}")
+    if r["Risk"] not in ("None", ""):
+        out.append(f"- Risk: **{r['Risk']}**" + (f": {r['Risk reason']}" if r["Risk reason"] else ""))
+    moments = rv.get("moments") or []
+    if moments:
+        out += ["", "## Key moments", "| Time | Moment | What happened |", "|---|---|---|"]
+        out += [f"| {mmss(m.get('time_sec'))} | {m.get('kind', '')} | {_cell(m.get('text'))} |" for m in moments]
+    return "\n".join(out)
+
+
+def _pdf_button(r, rv) -> None:
+    try:
+        from callanalyzer.config import load_settings
+        from callanalyzer.pdf import report_pdf
+        company = load_settings()["company"]["name"]
+        date = f"{r['Date']:%d %b %Y}" if pd.notna(r["Date"]) else ""
+        score = "FATAL" if r["Fatal"] else f"{int(rv.get('overall_score') or 0)}/10"
+        sub = "  ·  ".join(x for x in [r["Call type"], date, f"{mmss(r['Minutes'] * 60)} min",
+                                       f"Mobile {r['Mobile']}" if r["Mobile"] else "", f"Score {score}", r["File"]] if x)
+        pdf = report_pdf(call_markdown(r, rv), f"Call review · {r['Executive']} · {r['Customer'] or r['File']}", sub,
+                         f"{company} call review · {r['Executive']} · {date}")
+        name = "_".join(str(x) for x in ["call_review", r["Executive"], r["Date"].strftime("%Y%m%d") if pd.notna(r["Date"]) else "", r["id"]] if x)
+        st.download_button("📄 Download this review (PDF)", pdf, f"{name.replace(' ', '_')}.pdf", "application/pdf",
+                           key=f"cv_pdf_{r['id']}")
+    except Exception as e:  # never break the call view over the PDF
+        st.caption(f"PDF not available: {type(e).__name__}: {e}")
 
 
 # ---- header ----------------------------------------------------------------------------------

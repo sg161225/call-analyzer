@@ -57,11 +57,11 @@ def report_pdf(md: str, title: str, subtitle: str = "", footer: str = "") -> byt
     doc.set_fill_color(255, 255, 255)
     doc.set_font("dv", "B", 20)
     doc.set_text_color(25, 25, 25)
-    doc.multi_cell(0, 10, _clean(title, cmap), new_x="LMARGIN", new_y="NEXT")
+    doc.multi_cell(0, 10, _clean(title, cmap), new_x="LMARGIN", new_y="NEXT", align="L")
     if subtitle:
         doc.set_font("dv", "", 9.5)
         doc.set_text_color(100, 100, 100)
-        doc.multi_cell(0, 5.5, _clean(subtitle, cmap), new_x="LMARGIN", new_y="NEXT")
+        doc.multi_cell(0, 5.5, _clean(subtitle, cmap), new_x="LMARGIN", new_y="NEXT", align="L")
     doc.ln(2)
     doc.set_draw_color(*ACCENT)
     doc.set_line_width(0.5)
